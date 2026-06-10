@@ -96,9 +96,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("""
-            DELETE FROM config
-        """)
+        cursor.execute("DELETE FROM config")
         
         cursor.execute("""
             INSERT INTO config (system_name, total_participants, pass_percentage)

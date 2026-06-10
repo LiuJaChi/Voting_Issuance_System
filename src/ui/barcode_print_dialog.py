@@ -1,2 +1,101 @@
 """
-條碼打印對話框\n\"\"\"\nfrom PyQt6.QtWidgets import (\n    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,\n    QPushButton, QMessageBox, QFileDialog\n)\nfrom PyQt6.QtCore import Qt\n\nfrom src.backend.barcode_generator import BarcodeGenerator\nfrom src.backend.config_manager import ConfigManager\n\n\nclass BarcodePrintDialog(QDialog):\n    \"\"\"條碼打印對話框\"\"\"\n    \n    def __init__(self, parent=None):\n        \"\"\"初始化條碼打印對話框\"\"\"\n        super().__init__(parent)\n        self.setWindowTitle(\"生成和打印條碼\")\n        self.setGeometry(100, 100, 400, 200)\n        \n        self.config_manager = ConfigManager()\n        self.barcode_generator = BarcodeGenerator()\n        \n        self.init_ui()\n    \n    def init_ui(self):\n        \"\"\"初始化用戶界面\"\"\"\n        main_layout = QVBoxLayout()\n        \n        # 參與人數\n        count_layout = QHBoxLayout()\n        count_layout.addWidget(QLabel(\"生成條碼數量:\"))\n        \n        self.count_input = QSpinBox()\n        self.count_input.setMinimum(1)\n        self.count_input.setMaximum(10000)\n        self.count_input.setValue(\n            self.config_manager.get_config('total_participants', 100)\n        )\n        count_layout.addWidget(self.count_input)\n        count_layout.addStretch()\n        \n        main_layout.addLayout(count_layout)\n        \n        # 條碼前綴\n        prefix_layout = QHBoxLayout()\n        prefix_layout.addWidget(QLabel(\"條碼前綴:\"))\n        self.prefix_display = QLabel(\n            self.config_manager.get_config('barcode_prefix', 'VOTER')\n        )\n        prefix_layout.addWidget(self.prefix_display)\n        prefix_layout.addStretch()\n        \n        main_layout.addLayout(prefix_layout)\n        \n        # 說明\n        info_label = QLabel(\n            \"條碼將以 [前綴][序號] 的格式生成\\n\"\n            \"例如: VOTER00001, VOTER00002, ...\"\n        )\n        main_layout.addWidget(info_label)\n        \n        main_layout.addStretch()\n        \n        # 按鈕佈局\n        button_layout = QHBoxLayout()\n        \n        generate_button = QPushButton(\"生成條碼\")\n        generate_button.clicked.connect(self.generate_barcodes)\n        button_layout.addWidget(generate_button)\n        \n        cancel_button = QPushButton(\"取消\")\n        cancel_button.clicked.connect(self.reject)\n        button_layout.addWidget(cancel_button)\n        \n        main_layout.addLayout(button_layout)\n        \n        self.setLayout(main_layout)\n    \n    def generate_barcodes(self):\n        \"\"\"生成條碼\"\"\"\n        count = self.count_input.value()\n        prefix = self.config_manager.get_config('barcode_prefix', 'VOTER')\n        \n        # 生成條碼數據\n        barcodes = self.barcode_generator.generate_voter_barcodes(count, prefix)\n        \n        try:\n            # 批量生成條碼圖片\n            self.barcode_generator.generate_batch_barcodes(barcodes)\n            \n            QMessageBox.information(\n                self, \"成功\",\n                f\"已生成 {count} 個條碼\\n\"\n                f\"條碼圖片已保存到: exports/barcodes/\"\n            )\n            self.accept()\n        except Exception as e:\n            QMessageBox.critical(self, \"錯誤\", f\"條碼生成失敗: {e}\")\n"
+條碼打印對話框
+"""
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox,
+    QPushButton, QMessageBox
+)
+from PyQt6.QtCore import Qt
+
+from src.backend.barcode_generator import BarcodeGenerator
+from src.backend.config_manager import ConfigManager
+
+
+class BarcodePrintDialog(QDialog):
+    """條碼打印對話框"""
+    
+    def __init__(self, parent=None):
+        """初始化條碼打印對話框"""
+        super().__init__(parent)
+        self.setWindowTitle("生成和打印條碼")
+        self.setGeometry(100, 100, 400, 200)
+        
+        self.config_manager = ConfigManager()
+        self.barcode_generator = BarcodeGenerator()
+        
+        self.init_ui()
+    
+    def init_ui(self):
+        """初始化用戶界面"""
+        main_layout = QVBoxLayout()
+        
+        # 參與人數
+        count_layout = QHBoxLayout()
+        count_layout.addWidget(QLabel("生成條碼數量:"))
+        
+        self.count_input = QSpinBox()
+        self.count_input.setMinimum(1)
+        self.count_input.setMaximum(10000)
+        self.count_input.setValue(
+            self.config_manager.get_config('total_participants', 100)
+        )
+        count_layout.addWidget(self.count_input)
+        count_layout.addStretch()
+        
+        main_layout.addLayout(count_layout)
+        
+        # 條碼前綴
+        prefix_layout = QHBoxLayout()
+        prefix_layout.addWidget(QLabel("條碼前綴:"))
+        self.prefix_display = QLabel(
+            self.config_manager.get_config('barcode_prefix', 'VOTER')
+        )
+        prefix_layout.addWidget(self.prefix_display)
+        prefix_layout.addStretch()
+        
+        main_layout.addLayout(prefix_layout)
+        
+        # 說明
+        info_label = QLabel(
+            "條碼將以 [前綴][序號] 的格式生成\n"
+            "例如: VOTER00001, VOTER00002, ..."
+        )
+        main_layout.addWidget(info_label)
+        
+        main_layout.addStretch()
+        
+        # 按鈕佈局
+        button_layout = QHBoxLayout()
+        
+        generate_button = QPushButton("生成條碼")
+        generate_button.clicked.connect(self.generate_barcodes)
+        button_layout.addWidget(generate_button)
+        
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_button)
+        
+        main_layout.addLayout(button_layout)
+        
+        self.setLayout(main_layout)
+    
+    def generate_barcodes(self):
+        """生成條碼"""
+        count = self.count_input.value()
+        prefix = self.config_manager.get_config('barcode_prefix', 'VOTER')
+        
+        # 生成條碼數據
+        barcodes = self.barcode_generator.generate_voter_barcodes(count, prefix)
+        
+        try:
+            # 批量生成條碼圖片
+            self.barcode_generator.generate_batch_barcodes(barcodes)
+            
+            QMessageBox.information(
+                self, "成功",
+                f"已生成 {count} 個條碼\n"
+                f"條碼圖片已保存到: exports/barcodes/"
+            )
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"條碼生成失敗: {e}")

@@ -1,5 +1,5 @@
 """
-主應用程序入口
+主應用程式入口
 """
 import sys
 from pathlib import Path
@@ -15,7 +15,7 @@ def main():
     """應用入口點"""
     app = QApplication(sys.argv)
     
-    # 設置應用程序信息
+    # 設置應用程式信息
     app.setApplicationName("投票系統")
     app.setApplicationVersion("1.0.0")
     

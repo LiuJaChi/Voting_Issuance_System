@@ -1,2 +1,164 @@
 """
-投票窗口\n\"\"\"\nfrom PyQt6.QtWidgets import (\n    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,\n    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,\n    QHeaderView, QComboBox\n)\nfrom PyQt6.QtCore import Qt\nfrom PyQt6.QtGui import QFont\n\nfrom src.backend.database import Database\nfrom src.backend.utils import normalize_vote\n\n\nclass VotingWindow(QWidget):\n    \"\"\"投票窗口\"\"\"\n    \n    def __init__(self, parent=None):\n        \"\"\"初始化投票窗口\"\"\"\n        super().__init__(parent)\n        self.db = Database()\n        \n        self.current_voter = None\n        self.voting_items = []\n        \n        self.init_ui()\n        self.load_voting_items()\n    \n    def init_ui(self):\n        \"\"\"初始化用戶界面\"\"\"\n        main_layout = QVBoxLayout()\n        \n        # 標題\n        title = QLabel(\"投票\")\n        title_font = QFont()\n        title_font.setPointSize(14)\n        title_font.setBold(True)\n        title.setFont(title_font)\n        main_layout.addWidget(title)\n        \n        # 條碼掃描輸入\n        scan_layout = QHBoxLayout()\n        scan_layout.addWidget(QLabel(\"掃描條碼:\"))\n        self.barcode_input = QLineEdit()\n        self.barcode_input.setPlaceholderText(\"請掃描條碼開始投票...\")\n        self.barcode_input.returnPressed.connect(self.process_voter_barcode)\n        scan_layout.addWidget(self.barcode_input)\n        \n        main_layout.addLayout(scan_layout)\n        \n        # 投票項目表\n        self.voting_table = QTableWidget()\n        self.voting_table.setColumnCount(3)\n        self.voting_table.setHorizontalHeaderLabels(\n            [\"項目\", \"投票\", \"操作\"]\n        )\n        self.voting_table.horizontalHeader().setSectionResizeMode(\n            0, QHeaderView.ResizeMode.Stretch\n        )\n        main_layout.addWidget(self.voting_table)\n        \n        # 按鈕佈局\n        button_layout = QHBoxLayout()\n        \n        refresh_button = QPushButton(\"刷新\")\n        refresh_button.clicked.connect(self.load_voting_items)\n        button_layout.addWidget(refresh_button)\n        \n        export_button = QPushButton(\"導出投票數據\")\n        export_button.clicked.connect(self.export_voting_data)\n        button_layout.addWidget(export_button)\n        \n        button_layout.addStretch()\n        main_layout.addLayout(button_layout)\n        \n        self.setLayout(main_layout)\n    \n    def process_voter_barcode(self):\n        \"\"\"處理投票者條碼\"\"\"\n        barcode = self.barcode_input.text().strip()\n        \n        if not barcode:\n            QMessageBox.warning(self, \"警告\", \"請輸入條碼\")\n            return\n        \n        # 查找投票者\n        voter = self.db.get_voter(barcode)\n        if not voter:\n            QMessageBox.critical(self, \"錯誤\", f\"條碼 {barcode} 不存在\")\n            self.barcode_input.clear()\n            return\n        \n        # 檢查是否報到\n        if voter['status'] != 'checked_in':\n            QMessageBox.warning(self, \"警告\", \"請先報到\")\n            self.barcode_input.clear()\n            return\n        \n        self.current_voter = voter\n        self.barcode_input.clear()\n        self.refresh_voting_items()\n        QMessageBox.information(self, \"提示\", f\"投票者: {voter['voter_id']} 準備投票\")\n    \n    def load_voting_items(self):\n        \"\"\"加載投票項目\"\"\"\n        conn = self.db.get_connection()\n        cursor = conn.cursor()\n        \n        cursor.execute(\"SELECT id, name, description FROM voting_items\")\n        self.voting_items = [dict(row) for row in cursor.fetchall()]\n        conn.close()\n        \n        self.refresh_voting_items()\n    \n    def refresh_voting_items(self):\n        \"\"\"刷新投票項目表\"\"\"\n        self.voting_table.setRowCount(0)\n        \n        for idx, item in enumerate(self.voting_items):\n            self.voting_table.insertRow(idx)\n            \n            # 項目名稱\n            self.voting_table.setItem(idx, 0, QTableWidgetItem(item['name']))\n            \n            # 投票選項\n            vote_combo = QComboBox()\n            vote_combo.addItems([\"-- 選擇投票 --\", \"贊成\", \"反對\"])\n            self.voting_table.setCellWidget(idx, 1, vote_combo)\n            \n            # 操作按鈕\n            vote_button = QPushButton(\"投票\")\n            vote_button.clicked.connect(\n                lambda checked, item_id=item['id'], row=idx: self.submit_vote(item_id, row)\n            )\n            self.voting_table.setCellWidget(idx, 2, vote_button)\n    \n    def submit_vote(self, item_id: int, row: int):\n        \"\"\"提交投票\"\"\"\n        if not self.current_voter:\n            QMessageBox.warning(self, \"警告\", \"請先掃描條碼\")\n            return\n        \n        vote_combo = self.voting_table.cellWidget(row, 1)\n        vote_text = vote_combo.currentText()\n        \n        if vote_text == \"-- 選擇投票 --\":\n            QMessageBox.warning(self, \"警告\", \"請選擇投票選項\")\n            return\n        \n        vote = normalize_vote(vote_text)\n        \n        if self.db.record_vote(self.current_voter['voter_id'], item_id, vote):\n            QMessageBox.information(self, \"成功\", \"投票已記錄\")\n            vote_combo.setCurrentIndex(0)\n        else:\n            QMessageBox.critical(self, \"錯誤\", \"投票記錄失敗\")\n    \n    def export_voting_data(self):\n        \"\"\"導出投票數據\"\"\"\n        if self.db.export_data():\n            QMessageBox.information(self, \"成功\", \"投票數據已導出到 exports/data.json\")\n        else:\n            QMessageBox.critical(self, \"錯誤\", \"數據導出失敗\")\n"
+投票窗口
+"""
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
+    QHeaderView, QComboBox
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+
+from src.backend.database import Database
+from src.backend.utils import normalize_vote
+
+
+class VotingWindow(QWidget):
+    """投票窗口"""
+    
+    def __init__(self, parent=None):
+        """初始化投票窗口"""
+        super().__init__(parent)
+        self.db = Database()
+        
+        self.current_voter = None
+        self.voting_items = []
+        
+        self.init_ui()
+        self.load_voting_items()
+    
+    def init_ui(self):
+        """初始化用戶界面"""
+        main_layout = QVBoxLayout()
+        
+        # 標題
+        title = QLabel("投票")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title.setFont(title_font)
+        main_layout.addWidget(title)
+        
+        # 條碼掃描輸入
+        scan_layout = QHBoxLayout()
+        scan_layout.addWidget(QLabel("掃描條碼:"))
+        self.barcode_input = QLineEdit()
+        self.barcode_input.setPlaceholderText("請掃描條碼開始投票...")
+        self.barcode_input.returnPressed.connect(self.process_voter_barcode)
+        scan_layout.addWidget(self.barcode_input)
+        
+        main_layout.addLayout(scan_layout)
+        
+        # 投票項目表
+        self.voting_table = QTableWidget()
+        self.voting_table.setColumnCount(3)
+        self.voting_table.setHorizontalHeaderLabels(
+            ["項目", "投票", "操作"]
+        )
+        self.voting_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        main_layout.addWidget(self.voting_table)
+        
+        # 按鈕佈局
+        button_layout = QHBoxLayout()
+        
+        refresh_button = QPushButton("刷新")
+        refresh_button.clicked.connect(self.load_voting_items)
+        button_layout.addWidget(refresh_button)
+        
+        export_button = QPushButton("導出投票數據")
+        export_button.clicked.connect(self.export_voting_data)
+        button_layout.addWidget(export_button)
+        
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
+        
+        self.setLayout(main_layout)
+    
+    def process_voter_barcode(self):
+        """處理投票者條碼"""
+        barcode = self.barcode_input.text().strip()
+        
+        if not barcode:
+            QMessageBox.warning(self, "警告", "請輸入條碼")
+            return
+        
+        # 查找投票者
+        voter = self.db.get_voter(barcode)
+        if not voter:
+            QMessageBox.critical(self, "錯誤", f"條碼 {barcode} 不存在")
+            self.barcode_input.clear()
+            return
+        
+        # 檢查是否報到
+        if voter['status'] != 'checked_in':
+            QMessageBox.warning(self, "警告", "請先報到")
+            self.barcode_input.clear()
+            return
+        
+        self.current_voter = voter
+        self.barcode_input.clear()
+        self.refresh_voting_items()
+        QMessageBox.information(self, "提示", f"投票者: {voter['voter_id']} 準備投票")
+    
+    def load_voting_items(self):
+        """加載投票項目"""
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, name, description FROM voting_items")
+        self.voting_items = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        
+        self.refresh_voting_items()
+    
+    def refresh_voting_items(self):
+        """刷新投票項目表"""
+        self.voting_table.setRowCount(0)
+        
+        for idx, item in enumerate(self.voting_items):
+            self.voting_table.insertRow(idx)
+            
+            # 項目名稱
+            self.voting_table.setItem(idx, 0, QTableWidgetItem(item['name']))
+            
+            # 投票選項
+            vote_combo = QComboBox()
+            vote_combo.addItems(["-- 選擇投票 --", "贊成", "反對"])
+            self.voting_table.setCellWidget(idx, 1, vote_combo)
+            
+            # 操作按鈕
+            vote_button = QPushButton("投票")
+            vote_button.clicked.connect(
+                lambda checked, item_id=item['id'], row=idx: self.submit_vote(item_id, row)
+            )
+            self.voting_table.setCellWidget(idx, 2, vote_button)
+    
+    def submit_vote(self, item_id: int, row: int):
+        """提交投票"""
+        if not self.current_voter:
+            QMessageBox.warning(self, "警告", "請先掃描條碼")
+            return
+        
+        vote_combo = self.voting_table.cellWidget(row, 1)
+        vote_text = vote_combo.currentText()
+        
+        if vote_text == "-- 選擇投票 --":
+            QMessageBox.warning(self, "警告", "請選擇投票選項")
+            return
+        
+        vote = normalize_vote(vote_text)
+        
+        if self.db.record_vote(self.current_voter['voter_id'], item_id, vote):
+            QMessageBox.information(self, "成功", "投票已記錄")
+            vote_combo.setCurrentIndex(0)
+        else:
+            QMessageBox.critical(self, "錯誤", "投票記錄失敗")
+    
+    def export_voting_data(self):
+        """導出投票數據"""
+        if self.db.export_data():
+            QMessageBox.information(self, "成功", "投票數據已導出到 exports/data.json")
+        else:
+            QMessageBox.critical(self, "錯誤", "數據導出失敗")

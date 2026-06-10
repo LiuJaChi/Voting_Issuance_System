@@ -3,13 +3,19 @@
 """
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QTabWidget, QMessageBox
+    QPushButton, QLabel, QTabWidget, QMessageBox, QMenuBar, QMenu
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QIcon, QFont
 
 from src.backend.database import Database
 from src.backend.config_manager import ConfigManager
+from src.ui.check_in_window import CheckInWindow
+from src.ui.voting_window import VotingWindow
+from src.ui.results_window import ResultsWindow
+from src.ui.setup_dialog import SetupDialog
+from src.ui.voting_item_dialog import VotingItemDialog
+from src.ui.barcode_print_dialog import BarcodePrintDialog
 
 
 class MainWindow(QMainWindow):
@@ -34,6 +40,9 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
+        # 創建菜單欄
+        self.create_menu_bar()
+        
         # 創建主佈局
         main_layout = QVBoxLayout()
         
@@ -49,65 +58,88 @@ class MainWindow(QMainWindow):
         # 創建標籤頁
         tabs = QTabWidget()
         
-        # 系統設置標籤
-        setup_widget = self.create_setup_tab()
-        tabs.addTab(setup_widget, "系統設置")
-        
         # 報到標籤
-        check_in_widget = self.create_check_in_tab()
-        tabs.addTab(check_in_widget, "報到")
+        self.check_in_window = CheckInWindow()
+        tabs.addTab(self.check_in_window, "報到管理")
         
         # 投票標籤
-        voting_widget = self.create_voting_tab()
-        tabs.addTab(voting_widget, "投票")
+        self.voting_window = VotingWindow()
+        tabs.addTab(self.voting_window, "投票")
         
         # 結果標籤
-        results_widget = self.create_results_tab()
-        tabs.addTab(results_widget, "結果")
+        self.results_window = ResultsWindow()
+        tabs.addTab(self.results_window, "結果統計")
         
         main_layout.addWidget(tabs)
         central_widget.setLayout(main_layout)
     
-    def create_setup_tab(self) -> QWidget:
-        """創建系統設置標籤"""
-        widget = QWidget()
-        layout = QVBoxLayout()
+    def create_menu_bar(self):
+        """創建菜單欄"""
+        menubar = self.menuBar()
         
-        label = QLabel("系統設置功能開發中...")
-        layout.addWidget(label)
+        # 系統菜單
+        system_menu = menubar.addMenu("系統")
         
-        widget.setLayout(layout)
-        return widget
+        setup_action = system_menu.addAction("系統設置")
+        setup_action.triggered.connect(self.open_setup_dialog)
+        
+        system_menu.addSeparator()
+        
+        exit_action = system_menu.addAction("退出")
+        exit_action.triggered.connect(self.close)
+        
+        # 投票菜單
+        voting_menu = menubar.addMenu("投票")
+        
+        items_action = voting_menu.addAction("管理投票項目")
+        items_action.triggered.connect(self.open_voting_items_dialog)
+        
+        barcode_action = voting_menu.addAction("生成條碼")
+        barcode_action.triggered.connect(self.open_barcode_dialog)
+        
+        # 數據菜單
+        data_menu = menubar.addMenu("數據")
+        
+        export_action = data_menu.addAction("導出數據")
+        export_action.triggered.connect(self.export_all_data)
+        
+        clear_action = data_menu.addAction("清空數據")
+        clear_action.triggered.connect(self.clear_all_data)
     
-    def create_check_in_tab(self) -> QWidget:
-        """創建報到標籤"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        
-        label = QLabel("報到功能開發中...")
-        layout.addWidget(label)
-        
-        widget.setLayout(layout)
-        return widget
+    def open_setup_dialog(self):
+        """打開系統設置對話框"""
+        dialog = SetupDialog(self)
+        dialog.exec()
     
-    def create_voting_tab(self) -> QWidget:
-        """創建投票標籤"""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        
-        label = QLabel("投票功能開發中...")
-        layout.addWidget(label)
-        
-        widget.setLayout(layout)
-        return widget
+    def open_voting_items_dialog(self):
+        """打開投票項目管理對話框"""
+        dialog = VotingItemDialog(self)
+        dialog.exec()
+        # 刷新投票窗口
+        self.voting_window.load_voting_items()
     
-    def create_results_tab(self) -> QWidget:
-        """創建結果標籤"""
-        widget = QWidget()
-        layout = QVBoxLayout()
+    def open_barcode_dialog(self):
+        """打開條碼打印對話框"""
+        dialog = BarcodePrintDialog(self)
+        dialog.exec()
+    
+    def export_all_data(self):
+        """導出所有數據"""
+        if self.db.export_data():
+            QMessageBox.information(self, "成功", "數據已導出到 exports/data.json")
+        else:
+            QMessageBox.critical(self, "錯誤", "數據導出失敗")
+    
+    def clear_all_data(self):
+        """清空所有數據"""
+        reply = QMessageBox.question(
+            self, "確認", "確定要清空所有數據嗎？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
         
-        label = QLabel("結果統計功能開發中...")
-        layout.addWidget(label)
-        
-        widget.setLayout(layout)
-        return widget
+        if reply == QMessageBox.StandardButton.Yes:
+            self.db.clear_all_data()
+            self.check_in_window.refresh_check_in_list()
+            self.voting_window.load_voting_items()
+            self.results_window.refresh_results()
+            QMessageBox.information(self, "成功", "數據已清空")
