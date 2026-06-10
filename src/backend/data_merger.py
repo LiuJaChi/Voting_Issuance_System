@@ -82,6 +82,7 @@ class DataMerger:
             'total_votes': len(data.get('votes', [])),
             'total_check_in': len(data.get('check_in_records', [])),
             'pass_percentage': pass_percentage,
+            'skipped_votes_missing_case_number': 0,
             'items': {}
         }
 
@@ -90,6 +91,7 @@ class DataMerger:
             case_number = (vote.get('case_number') or '').strip().upper()
             vote_value = (vote.get('vote') or '').lower()
             if not case_number:
+                results['skipped_votes_missing_case_number'] += 1
                 continue
             if case_number not in votes_by_case:
                 votes_by_case[case_number] = {'yes': 0, 'no': 0}

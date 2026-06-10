@@ -134,7 +134,8 @@ class VotingWindow(QWidget):
             QMessageBox.warning(self, "警告", "請先掃描戶號條碼")
             return
 
-        if item_id in set(self.db.get_voted_item_ids(self.current_voter['household_id'])):
+        voted_item_ids = set(self.db.get_voted_item_ids(self.current_voter['household_id']))
+        if item_id in voted_item_ids:
             QMessageBox.warning(self, "警告", "此戶號對該案號已投過票")
             self.refresh_voting_items()
             return

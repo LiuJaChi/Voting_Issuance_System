@@ -26,7 +26,7 @@ class BarcodeGenerator:
         if not normalized:
             raise ValueError("條碼內容不可為空")
         if not BarcodeGenerator.CODE39_PATTERN.fullmatch(normalized):
-            raise ValueError("Code39 僅支援英數大寫及 - . $ / + % 空白")
+            raise ValueError(f"條碼內容 `{normalized}` 不符合 Code39 規則；僅支援英數大寫及 - . $ / + % 空白")
         return normalized
 
     def generate_barcode(self, barcode_data: str, filename: str = None) -> str:
