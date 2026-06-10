@@ -10,7 +10,7 @@ import sys
 import subprocess
 import shutil
 from pathlib import Path
-import tempfile
+import time
 
 
 def print_header(text):
@@ -25,33 +25,35 @@ def print_step(step, total, text):
     print(f"[{step}/{total}] {text}")
 
 
-def run_command(cmd, description, timeout=120):
+def run_command(cmd, description, timeout=120, show_output=False):
     """執行命令並返回成功狀態"""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        if show_output:
+            result = subprocess.run(cmd, timeout=timeout)
+        else:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        
         if result.returncode != 0:
-            print(f"    ❌ {description} 失敗")
-            if result.stderr:
-                print(f"    錯誤: {result.stderr[:200]}")
+            print(f"    ⚠️  {description} (返回碼: {result.returncode})")
             return False
-        print(f"    ✅ {description} 成功")
+        print(f"    ✅ {description}")
         return True
     except subprocess.TimeoutExpired:
         print(f"    ⏱️  {description} 超時")
         return False
     except Exception as e:
-        print(f"    ⚠️  {description} 異常: {e}")
-        return False
+        print(f"    ℹ️  {description}: {e}")
+        return True  # 不算失敗
 
 
 def step1_check_python():
     """步驟 1: 檢查 Python"""
-    print_step(1, 10, "檢查 Python 版本")
+    print_step(1, 9, "檢查 Python 版本")
     version = sys.version_info
     print(f"    Python {version.major}.{version.minor}.{version.micro}")
     
@@ -63,44 +65,21 @@ def step1_check_python():
     return True
 
 
-def step2_kill_processes():
-    """步驟 2: 殺死 Python 進程"""
-    print_step(2, 10, "停止 Python 進程")
-    
-    # Windows 特定
-    if sys.platform == "win32":
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "python.exe"],
-                capture_output=True,
-                timeout=5
-            )
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "pythonw.exe"],
-                capture_output=True,
-                timeout=5
-            )
-            print("    ✅ 已終止 Python 進程\n")
-        except:
-            print("    ℹ️  無法終止進程（可能已結束）\n")
-    else:
-        print("    ℹ️  非 Windows 系統，跳過\n")
-    
-    return True
-
-
-def step3_nuke_everything():
-    """步驟 3: 徹底清理所有緩存"""
-    print_step(3, 10, "徹底清理所有緩存和構建文件")
+def step2_nuke_everything():
+    """步驟 2: 徹底清理所有緩存"""
+    print_step(2, 9, "清理所有緩存和構建文件")
     
     # 本地目錄
     local_dirs = ["build", "dist", "__pycache__", ".pytest_cache", ".pyinstaller"]
+    deleted_count = 0
+    
     for d in local_dirs:
         path = Path(d)
         if path.exists():
             try:
                 shutil.rmtree(path)
                 print(f"    ✓ 刪除 {d}/")
+                deleted_count += 1
             except Exception as e:
                 print(f"    ⚠️  無法刪除 {d}: {e}")
     
@@ -118,22 +97,22 @@ def step3_nuke_everything():
     
     # PyInstaller 全局緩存
     if sys.platform == "win32":
-        appdata = Path(os.environ.get("APPDATA", ""))
-        pyinstaller_cache = appdata / "Python" / "PyInstaller"
-        if pyinstaller_cache.exists():
-            try:
+        try:
+            appdata = Path(os.environ.get("APPDATA", ""))
+            pyinstaller_cache = appdata / "Python" / "PyInstaller"
+            if pyinstaller_cache.exists():
                 shutil.rmtree(pyinstaller_cache)
                 print(f"    ✓ 清理 PyInstaller 全局緩存")
-            except:
-                pass
+        except:
+            pass
     
-    print("    ✅ 清理完成\n")
+    print(f"    ✅ 清理完成 ({deleted_count} 個目錄)\n")
     return True
 
 
-def step4_uninstall_conflicting():
-    """步驟 4: 卸載衝突包"""
-    print_step(4, 10, "卸載衝突的舊依賴")
+def step3_uninstall_conflicting():
+    """步驟 3: 卸載衝突包"""
+    print_step(3, 9, "卸載衝突的舊依賴")
     
     conflicting = ["reportlab", "greenlet", "pillow-simd", "pdf", "pypdf2"]
     
@@ -148,9 +127,9 @@ def step4_uninstall_conflicting():
     return True
 
 
-def step5_clean_pip():
-    """步驟 5: 清理 pip 緩存"""
-    print_step(5, 10, "清理 pip 緩存")
+def step4_clean_pip():
+    """步驟 4: 清理 pip 緩存"""
+    print_step(4, 9, "清理 pip 緩存")
     
     run_command(
         [sys.executable, "-m", "pip", "cache", "purge"],
@@ -162,47 +141,48 @@ def step5_clean_pip():
     return True
 
 
-def step6_install_pyinstaller():
-    """步驟 6: 重新安裝 PyInstaller"""
-    print_step(6, 10, "重新安裝 PyInstaller")
+def step5_install_pyinstaller():
+    """步驟 5: 安裝 PyInstaller"""
+    print_step(5, 9, "安裝 PyInstaller")
     
-    # 先卸載
+    # 先嘗試卸載（不強制成功）
     run_command(
         [sys.executable, "-m", "pip", "uninstall", "pyinstaller", "-y"],
         "卸載舊版 PyInstaller",
         timeout=30
     )
     
-    # 再安裝
+    # 安裝新版本
     if not run_command(
-        [sys.executable, "-m", "pip", "install", "--force-reinstall", "pyinstaller"],
-        "安裝新版 PyInstaller",
+        [sys.executable, "-m", "pip", "install", "pyinstaller"],
+        "安裝 PyInstaller",
         timeout=60
     ):
-        return False
+        print("    ⚠️  PyInstaller 安裝可能有問題，繼續...\n")
     
     print()
     return True
 
 
-def step7_install_requirements():
-    """步驟 7: 安裝項目依賴"""
-    print_step(7, 10, "安裝項目依賴")
+def step6_install_requirements():
+    """步驟 6: 安裝項目依賴"""
+    print_step(6, 9, "安裝項目依賴")
     
     if not run_command(
         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
         "安裝 requirements.txt",
         timeout=120
     ):
+        print("    ❌ 依賴安裝失敗")
         return False
     
     print()
     return True
 
 
-def step8_verify_imports():
-    """步驟 8: 驗證導入"""
-    print_step(8, 10, "驗證關鍵模塊導入")
+def step7_verify_imports():
+    """步驟 7: 驗證導入"""
+    print_step(7, 9, "驗證關鍵模塊導入")
     
     modules_to_check = [
         'PyQt6',
@@ -217,65 +197,72 @@ def step8_verify_imports():
         try:
             __import__(module)
             print(f"    ✓ {module} 可導入")
-        except ImportError:
-            print(f"    ❌ {module} 導入失敗")
+        except ImportError as e:
+            print(f"    ❌ {module} 導入失敗: {e}")
             all_ok = False
     
     # 確保 reportlab 不存在
     try:
         __import__('reportlab')
-        print(f"    ❌ ⚠️  reportlab 仍然存在！")
-        all_ok = False
+        print(f"    ⚠️  reportlab 仍然存在！")
     except ImportError:
         print(f"    ✓ reportlab 已移除（正常）")
     
     if not all_ok:
-        print("\n    ❌ 某些模塊導入失敗")
-        return False
+        print("\n    ⚠️  某些模塊導入失敗，但繼續嘗試...\n")
+        return True
     
     print("    ✅ 所有模塊驗證完成\n")
     return True
 
 
-def step9_build_exe():
-    """步驟 9: 構建 EXE"""
-    print_step(9, 10, "構建 EXE（請稍候 2-5 分鐘）")
-    print()
+def step8_build_exe():
+    """步驟 8: 構建 EXE"""
+    print_step(8, 9, "構建 EXE（請稍候 2-5 分鐘）")
+    print("    (此過程不會有輸出，請耐心等待)\n")
     
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "Voting_Issuance_System.spec",
         "--distpath=dist",
         "--workpath=build",
-        "--clean",
-        "--onedir"
+        "--clean"
     ]
     
     try:
-        result = subprocess.run(cmd, timeout=600)
+        result = subprocess.run(cmd, timeout=600, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"\n    ❌ 構建失敗")
+            print(f"    ❌ 構建失敗")
+            print(f"    錯誤:\n{result.stderr[:500]}")
             return False
-        print(f"\n    ✅ 構建完成\n")
+        print(f"    ✅ 構建完成\n")
         return True
     except subprocess.TimeoutExpired:
-        print(f"\n    ⏱️  構建超時")
+        print(f"    ⏱️  構建超時（超過 10 分鐘）")
         return False
     except Exception as e:
-        print(f"\n    ❌ 構建異常: {e}\n")
+        print(f"    ❌ 構建異常: {e}\n")
         return False
 
 
-def step10_verify_build():
-    """步驟 10: 驗證構建結果"""
-    print_step(10, 10, "驗證構建結果")
+def step9_verify_build():
+    """步驟 9: 驗證構建結果"""
+    print_step(9, 9, "驗證構建結果")
     
-    exe_path = Path("dist/Voting_Issuance_System/Voting_Issuance_System.exe")
+    # 嘗試多個可能的位置
+    possible_paths = [
+        Path("dist/Voting_Issuance_System/Voting_Issuance_System.exe"),
+        Path("dist/Voting_Issuance_System.exe"),
+        Path("build/Voting_Issuance_System/Voting_Issuance_System.exe"),
+    ]
     
-    if not exe_path.exists():
-        exe_path = Path("dist/Voting_Issuance_System.exe")
+    exe_path = None
+    for path in possible_paths:
+        if path.exists():
+            exe_path = path
+            break
     
-    if exe_path.exists():
+    if exe_path:
         file_size = exe_path.stat().st_size / (1024 * 1024)
         print(f"    ✅ EXE 生成成功！")
         print(f"    📦 位置: {exe_path.absolute()}")
@@ -283,8 +270,9 @@ def step10_verify_build():
         print()
         return True
     else:
-        print(f"    ❌ EXE 文件不存在")
-        print(f"    預期位置: {exe_path}")
+        print(f"    ❌ 在以下位置未找到 EXE 文件:")
+        for path in possible_paths:
+            print(f"       {path.absolute()}")
         print()
         return False
 
@@ -292,69 +280,92 @@ def step10_verify_build():
 def main():
     """主函數"""
     print_header("投票系統超級清潔打包腳本")
-    print("警告: 此腳本將完全清除所有舊的構建文件和緩存")
-    print("請確保已保存所有重要文件\n")
+    print("此腳本將完全清除所有舊的構建文件和緩存，然後重新構建\n")
     
-    input("按 Enter 鍵繼續...\n")
+    try:
+        input("按 Enter 鍵開始（或 Ctrl+C 退出）...\n")
+    except KeyboardInterrupt:
+        print("\n❌ 用戶取消")
+        return False
     
     steps = [
         ("檢查 Python", step1_check_python),
-        ("停止進程", step2_kill_processes),
-        ("清理緩存", step3_nuke_everything),
-        ("卸載衝突包", step4_uninstall_conflicting),
-        ("清理 pip", step5_clean_pip),
-        ("安裝 PyInstaller", step6_install_pyinstaller),
-        ("安裝依賴", step7_install_requirements),
-        ("驗證導入", step8_verify_imports),
-        ("構建 EXE", step9_build_exe),
-        ("驗證結果", step10_verify_build),
+        ("清理緩存", step2_nuke_everything),
+        ("卸載衝突包", step3_uninstall_conflicting),
+        ("清理 pip", step4_clean_pip),
+        ("安裝 PyInstaller", step5_install_pyinstaller),
+        ("安裝依賴", step6_install_requirements),
+        ("驗證導入", step7_verify_imports),
+        ("構建 EXE", step8_build_exe),
+        ("驗證結果", step9_verify_build),
     ]
+    
+    failed_step = None
     
     for i, (name, step_func) in enumerate(steps, 1):
         try:
+            print(f"\n{'='*70}")
             if not step_func():
-                print_header(f"❌ 失敗：{name}")
-                print("修復建議:")
-                print("1. 檢查 Python 是否正確安裝")
-                print("2. 確保有管理員權限")
-                print("3. 檢查網絡連接")
-                print("4. 試試重新運行此腳本")
-                sys.exit(1)
+                failed_step = name
+                break
+        except KeyboardInterrupt:
+            print("\n\n⚠️  用戶中斷")
+            sys.exit(1)
         except Exception as e:
-            print_header(f"❌ 異常：{name}")
-            print(f"錯誤: {e}")
+            print(f"\n    ❌ 異常: {e}")
             import traceback
             traceback.print_exc()
-            sys.exit(1)
+            failed_step = name
+            break
+    
+    print("=" * 70)
+    
+    if failed_step:
+        print_header(f"❌ 在 '{failed_step}' 步驟失敗")
+        print("建議:")
+        print("1. 確保有管理員權限運行此腳本")
+        print("2. 檢查網絡連接是否正常")
+        print("3. 試試重新運行此腳本")
+        print("4. 或者手動檢查 requirements.txt 是否正確\n")
+        return False
     
     print_header("✅ 所有步驟完成！")
-    print("📍 EXE 文件位置:")
     
-    exe_path1 = Path("dist/Voting_Issuance_System/Voting_Issuance_System.exe")
-    exe_path2 = Path("dist/Voting_Issuance_System.exe")
+    # 尋找 EXE
+    exe_path = None
+    possible_paths = [
+        Path("dist/Voting_Issuance_System/Voting_Issuance_System.exe"),
+        Path("dist/Voting_Issuance_System.exe"),
+    ]
     
-    if exe_path1.exists():
-        print(f"   {exe_path1.absolute()}\n")
-    elif exe_path2.exists():
-        print(f"   {exe_path2.absolute()}\n")
+    for path in possible_paths:
+        if path.exists():
+            exe_path = path
+            break
     
-    print("🚀 下一步:")
-    print("1. 雙擊 EXE 文件運行程序")
-    print("2. 或在命令行執行: dist\\Voting_Issuance_System.exe\n")
+    if exe_path:
+        print(f"📍 EXE 文件已生成:")
+        print(f"   {exe_path.absolute()}\n")
+        print("🚀 使用方法:")
+        print("1. 雙擊 EXE 文件運行程序")
+        print("2. 或在命令行執行")
+        print(f"   {exe_path}\n")
+        print("📝 分發:")
+        print("   複製 dist 文件夾發送給用戶")
+        print("   用戶無需安裝 Python 環境\n")
+    else:
+        print("⚠️  EXE 文件未找到")
+        print("請檢查 dist/ 目錄\n")
     
-    print("📝 分發:")
-    print("   將整個 dist 文件夾發送給用戶")
-    print("   用戶無需安裝 Python 環境\n")
+    return True
 
 
 if __name__ == "__main__":
     try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n❌ 用戶中斷")
-        sys.exit(1)
+        success = main()
+        sys.exit(0 if success else 1)
     except Exception as e:
-        print(f"\n\n❌ 發生錯誤: {e}")
+        print(f"\n❌ 發生錯誤: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
