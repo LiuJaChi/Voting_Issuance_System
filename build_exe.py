@@ -93,7 +93,7 @@ def build_exe():
             sys.executable, "-m", "PyInstaller",
             "Voting_Issuance_System.spec",
             "--distpath=dist",
-            "--buildpath=build"
+            "--workpath=build"
         ],
         capture_output=True,
         text=True
