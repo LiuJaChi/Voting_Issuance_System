@@ -21,7 +21,7 @@ def print_header(text):
 
 def check_python():
     """檢查 Python 版本"""
-    print("[1/6] 檢查 Python 版本...")
+    print("[1/7] 檢查 Python 版本...")
     version = sys.version_info
     print(f"Python {version.major}.{version.minor}.{version.micro}")
     
@@ -34,7 +34,7 @@ def check_python():
 
 def install_pyinstaller():
     """安裝 PyInstaller"""
-    print("[2/6] 檢查並安裝 PyInstaller...")
+    print("[2/7] 檢查並安裝 PyInstaller...")
     try:
         import PyInstaller
         print(f"✅ PyInstaller 已安裝 (版本: {PyInstaller.__version__})\n")
@@ -54,7 +54,7 @@ def install_pyinstaller():
 
 def install_requirements():
     """安裝項目依賴"""
-    print("[3/6] 安裝項目依賴...")
+    print("[3/7] 安裝項目依賴...")
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
         capture_output=True,
@@ -67,26 +67,55 @@ def install_requirements():
     return True
 
 
+def uninstall_reportlab():
+    """卸載 reportlab（如果存在）"""
+    print("[4/7] 檢查並移除舊的依賴...")
+    try:
+        import reportlab
+        print("⚠️  檢測到 reportlab，正在移除...")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "reportlab", "-y"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print("✅ reportlab 已移除")
+        else:
+            print(f"⚠️  reportlab 移除出現問題: {result.stderr}")
+    except ImportError:
+        print("✅ reportlab 未安裝，無需移除")
+    
+    # 清理 pip 緩存
+    subprocess.run([sys.executable, "-m", "pip", "cache", "purge"], capture_output=True)
+    print("✅ 依賴檢查完成\n")
+
+
 def cleanup_old_builds():
     """清理舊的構建文件"""
-    print("[4/6] 清理舊的構建文件...")
+    print("[5/7] 清理舊的構建文件...")
     dirs_to_remove = ["build", "dist", "__pycache__", ".pytest_cache"]
     
     for dir_name in dirs_to_remove:
         if Path(dir_name).exists():
-            shutil.rmtree(dir_name)
-            print(f"  ✓ 刪除 {dir_name}/")
+            try:
+                shutil.rmtree(dir_name)
+                print(f"  ✓ 刪除 {dir_name}/")
+            except Exception as e:
+                print(f"  ⚠️  無法刪除 {dir_name}/: {e}")
     
-    # 刪除舊的 .pyc 文件
+    # 刪除舊的 .pyc 文件和 .spec
     for pyc_file in Path(".").rglob("*.pyc"):
-        pyc_file.unlink()
+        try:
+            pyc_file.unlink()
+        except:
+            pass
     
     print("✅ 清理完成\n")
 
 
 def build_exe():
     """使用 PyInstaller 構建 EXE"""
-    print("[5/6] 開始打包程序...")
+    print("[6/7] 開始打包程序...")
     
     result = subprocess.run(
         [
@@ -112,7 +141,7 @@ def build_exe():
 
 def verify_build():
     """驗證構建結果"""
-    print("[6/6] 驗證打包結果...\n")
+    print("[7/7] 驗證打包結果...\n")
     
     exe_path = Path("dist/Voting_Issuance_System.exe")
     
@@ -151,6 +180,8 @@ def main():
         
         if not install_requirements():
             return False
+        
+        uninstall_reportlab()
         
         cleanup_old_builds()
         
