@@ -1,33 +1,28 @@
 """
-條碼生成模塊 - 使用 reportlab 生成高質量 Code128 條碼
+條碼生成模塊 - 使用 python-barcode 生成 Code128 條碼
 """
-from reportlab.graphics import renderPDF, renderPM
-from reportlab.graphics.barcode import code128
-from reportlab.lib.units import mm, inch
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
-from io import BytesIO
+import barcode
+from barcode.writer import ImageWriter
 from pathlib import Path
 from typing import List, Tuple
 import os
 
 
 class BarcodeGenerator:
-    """使用 reportlab 生成高質量 Code128 條碼"""
+    """使用 python-barcode 生成 Code128 條碼"""
 
     def __init__(self, output_dir: str = "exports/barcodes"):
         """初始化條碼生成器"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    def generate_barcode_image(self, barcode_data: str, filename: str = None, dpi: int = 300) -> str:
+    def generate_barcode_image(self, barcode_data: str, filename: str = None) -> str:
         """
         生成單個條碼圖片（PNG 格式）
 
         Args:
             barcode_data: 條碼數據（例如：06-02F 或 06-02F_001）
             filename: 輸出文件名（不含副檔名）
-            dpi: 解析度（默認 300 DPI）
 
         Returns:
             條碼文件路徑（含 .png）
@@ -39,41 +34,15 @@ class BarcodeGenerator:
         filepath = os.path.join(self.output_dir, filename)
         
         try:
-            # 生成 Code128 條碼圖形
-            barcode_obj = code128.Code128(
-                barcode_data,
-                barWidth=0.5 * mm,  # 條寬度
-                barHeight=15 * mm,   # 條高度
-                fontSize=14,         # 字體大小
-                humanReadable=True   # 顯示條碼下方的文字
-            )
-            
-            # 渲染為 PNG
-            renderPM.drawToFile(barcode_obj, f"{filepath}.png", fmt="PNG", dpi=dpi)
+            # 生成 Code128 條碼
+            code128_class = barcode.get_barcode_class('code128')
+            bar = code128_class(barcode_data, writer=ImageWriter())
+            bar.save(filepath)
             
             return f"{filepath}.png"
         except Exception as e:
             print(f"條碼生成失敗 {barcode_data}: {e}")
             raise
-
-    def generate_barcode_pdf_element(self, barcode_data: str) -> 'code128.Code128':
-        """
-        生成條碼元素（用於嵌入 PDF）
-
-        Args:
-            barcode_data: 條碼數據
-
-        Returns:
-            reportlab Code128 條碼對象
-        """
-        barcode_obj = code128.Code128(
-            barcode_data,
-            barWidth=0.5 * mm,
-            barHeight=15 * mm,
-            fontSize=12,
-            humanReadable=True
-        )
-        return barcode_obj
 
     def generate_household_barcode(self, household_id: str) -> str:
         """
