@@ -42,7 +42,7 @@ if exist "__pycache__\" (
 
 echo.
 echo [4/5] 開始打包程序...
-pyinstaller Voting_Issuance_System.spec --distpath=dist --buildpath=build
+pyinstaller Voting_Issuance_System.spec --distpath=dist --workpath=build
 
 if %errorlevel% neq 0 (
     echo.
@@ -60,8 +60,7 @@ if exist "dist\Voting_Issuance_System.exe" (
     echo =====================================
     echo.
     echo EXE 文件位置: dist\Voting_Issuance_System.exe
-    echo EXE 大小: 
-    for /f %%A in ('dir /b dist\Voting_Issuance_System.exe ^| find /v /c ""') do set count=%%A
+    echo.
     dir dist\Voting_Issuance_System.exe
     echo.
     echo 你可以直接雙擊 EXE 文件運行程序
