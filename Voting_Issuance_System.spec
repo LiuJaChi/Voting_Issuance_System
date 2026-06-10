@@ -10,9 +10,6 @@ a = Analysis(
         ('src/backend', 'src/backend'),
         ('src/models', 'src/models'),
         ('src/ui', 'src/ui'),
-        ('config', 'config'),
-        ('data', 'data'),
-        ('exports', 'exports'),
     ],
     hiddenimports=[
         'PyQt6',
