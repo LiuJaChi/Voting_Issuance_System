@@ -15,7 +15,6 @@ from src.ui.voting_window import VotingWindow
 from src.ui.results_window import ResultsWindow
 from src.ui.setup_dialog import SetupDialog
 from src.ui.voting_item_dialog import VotingItemDialog
-from src.ui.barcode_print_dialog import BarcodePrintDialog
 
 
 class MainWindow(QMainWindow):
@@ -94,9 +93,6 @@ class MainWindow(QMainWindow):
         items_action = voting_menu.addAction("管理投票項目")
         items_action.triggered.connect(self.open_voting_items_dialog)
         
-        barcode_action = voting_menu.addAction("生成條碼")
-        barcode_action.triggered.connect(self.open_barcode_dialog)
-        
         # 數據菜單
         data_menu = menubar.addMenu("數據")
         
@@ -117,11 +113,6 @@ class MainWindow(QMainWindow):
         dialog.exec()
         # 刷新投票窗口
         self.voting_window.load_voting_items()
-    
-    def open_barcode_dialog(self):
-        """打開條碼打印對話框"""
-        dialog = BarcodePrintDialog(self)
-        dialog.exec()
     
     def export_all_data(self):
         """導出所有數據"""
