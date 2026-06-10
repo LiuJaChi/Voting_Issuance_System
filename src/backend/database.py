@@ -10,24 +10,24 @@ from typing import List, Dict, Optional, Tuple
 
 class Database:
     """SQLite 數據庫管理類"""
-    
+
     def __init__(self, db_path: str = "data/votes.db"):
         """初始化數據庫連接"""
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
-    
+
     def get_connection(self):
         """獲取數據庫連接"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
-    
+
     def init_db(self):
         """初始化數據庫表"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
+
         # 系統配置表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS config (
@@ -39,273 +39,390 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # 投票者表
+
+        # 住戶表（以戶號為主鍵）
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS voters (
-                id INTEGER PRIMARY KEY,
-                voter_id TEXT UNIQUE NOT NULL,
-                barcode TEXT UNIQUE NOT NULL,
-                name TEXT,
+            CREATE TABLE IF NOT EXISTS households (
+                household_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
-                checked_in_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # 投票項目表
+
+        # 投票項目表（以案號為唯一標識）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voting_items (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_number TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # 投票紀錄表
+
+        # 投票記錄表（戶號+案號為複合主鍵）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS votes (
-                id INTEGER PRIMARY KEY,
-                voter_id TEXT NOT NULL,
-                item_id INTEGER NOT NULL,
+                household_id TEXT NOT NULL,
+                case_number TEXT NOT NULL,
                 vote TEXT NOT NULL,
                 voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 device_id TEXT,
-                FOREIGN KEY (item_id) REFERENCES voting_items(id)
+                PRIMARY KEY (household_id, case_number),
+                FOREIGN KEY (household_id) REFERENCES households(household_id),
+                FOREIGN KEY (case_number) REFERENCES voting_items(case_number)
             )
         """)
-        
-        # 報到紀錄表
+
+        # 報到記錄表
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS check_in_records (
-                id INTEGER PRIMARY KEY,
-                voter_id TEXT NOT NULL,
-                barcode TEXT NOT NULL,
+                household_id TEXT PRIMARY KEY,
                 checked_in_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 device_id TEXT,
-                UNIQUE(voter_id)
+                FOREIGN KEY (household_id) REFERENCES households(household_id)
             )
         """)
-        
+
         conn.commit()
         conn.close()
-    
+
+    # ─────────────────────────── 配置管理 ───────────────────────────
+
     def save_config(self, system_name: str, total_participants: int, pass_percentage: float):
         """保存系統配置"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("DELETE FROM config")
-        
         cursor.execute("""
             INSERT INTO config (system_name, total_participants, pass_percentage)
             VALUES (?, ?, ?)
         """, (system_name, total_participants, pass_percentage))
-        
         conn.commit()
         conn.close()
-    
+
     def get_config(self) -> Optional[Dict]:
         """獲取系統配置"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT * FROM config LIMIT 1")
         row = cursor.fetchone()
         conn.close()
-        
-        if row:
-            return dict(row)
-        return None
-    
-    def add_voter(self, voter_id: str, barcode: str, name: str = None) -> bool:
-        """添加投票者"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute("""
-                INSERT INTO voters (voter_id, barcode, name)
-                VALUES (?, ?, ?)
-            """, (voter_id, barcode, name))
-            conn.commit()
-            conn.close()
-            return True
-        except sqlite3.IntegrityError:
-            conn.close()
-            return False
-    
-    def get_voter(self, barcode: str) -> Optional[Dict]:
-        """通過條碼獲取投票者"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM voters WHERE barcode = ?", (barcode,))
-        row = cursor.fetchone()
-        conn.close()
-        
         return dict(row) if row else None
-    
-    def check_in_voter(self, voter_id: str, barcode: str, device_id: str = None) -> bool:
-        """報到投票者"""
+
+    # ─────────────────────────── 住戶管理 ───────────────────────────
+
+    def add_household(self, household_id: str, name: str) -> bool:
+        """新增住戶"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         try:
             cursor.execute("""
-                INSERT INTO check_in_records (voter_id, barcode, device_id)
-                VALUES (?, ?, ?)
-            """, (voter_id, barcode, device_id))
-            
-            cursor.execute("""
-                UPDATE voters SET status = 'checked_in', checked_in_at = CURRENT_TIMESTAMP
-                WHERE voter_id = ?
-            """, (voter_id,))
-            
+                INSERT INTO households (household_id, name)
+                VALUES (?, ?)
+            """, (household_id, name))
             conn.commit()
             conn.close()
             return True
         except sqlite3.IntegrityError:
             conn.close()
             return False
-    
-    def add_voting_item(self, name: str, description: str = None) -> int:
-        """添加投票項目"""
+
+    def update_household(self, household_id: str, name: str) -> bool:
+        """更新住戶姓名"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("""
-            INSERT INTO voting_items (name, description)
-            VALUES (?, ?)
-        """, (name, description))
-        
-        item_id = cursor.lastrowid
+            UPDATE households SET name = ? WHERE household_id = ?
+        """, (name, household_id))
         conn.commit()
         conn.close()
-        
-        return item_id
-    
-    def record_vote(self, voter_id: str, item_id: int, vote: str, device_id: str = None) -> bool:
-        """記錄投票"""
+        return True
+
+    def delete_household(self, household_id: str) -> bool:
+        """刪除住戶"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         try:
-            cursor.execute("""
-                INSERT INTO votes (voter_id, item_id, vote, device_id)
-                VALUES (?, ?, ?, ?)
-            """, (voter_id, item_id, vote, device_id))
-            
+            cursor.execute("DELETE FROM households WHERE household_id = ?", (household_id,))
             conn.commit()
             conn.close()
             return True
-        except sqlite3.Error as e:
+        except Exception:
             conn.close()
-            print(f"投票記錄錯誤: {e}")
             return False
-    
+
+    def get_household(self, household_id: str) -> Optional[Dict]:
+        """通過戶號獲取住戶"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM households WHERE household_id = ?", (household_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_households(self) -> List[Dict]:
+        """獲取所有住戶"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM households ORDER BY household_id")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def import_households(self, households: List[Dict]) -> Tuple[int, int]:
+        """批量導入住戶，返回 (成功數, 失敗數)"""
+        success = 0
+        failed = 0
+        for h in households:
+            if self.add_household(h['household_id'], h['name']):
+                success += 1
+            else:
+                failed += 1
+        return success, failed
+
+    # ─────────────────────────── 報到管理 ───────────────────────────
+
+    def check_in_household(self, household_id: str, device_id: str = None) -> bool:
+        """住戶報到"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO check_in_records (household_id, device_id)
+                VALUES (?, ?)
+            """, (household_id, device_id))
+            cursor.execute("""
+                UPDATE households SET status = 'checked_in'
+                WHERE household_id = ?
+            """, (household_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+
     def get_check_in_stats(self) -> Dict:
         """獲取報到統計"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        config = self.get_config()
-        if not config:
-            return {}
-        
+
+        cursor.execute("SELECT COUNT(*) as count FROM households")
+        total = cursor.fetchone()['count']
+
         cursor.execute("SELECT COUNT(*) as count FROM check_in_records")
         checked_in = cursor.fetchone()['count']
-        
-        total = config['total_participants']
-        percentage = (checked_in / total * 100) if total > 0 else 0
-        
+
         conn.close()
-        
+
+        percentage = (checked_in / total * 100) if total > 0 else 0
         return {
             'total_expected': total,
             'checked_in': checked_in,
             'percentage': round(percentage, 2)
         }
-    
-    def get_voting_results(self, item_id: int) -> Dict:
-        """獲取投票結果"""
+
+    # ─────────────────────────── 投票項目管理 ───────────────────────────
+
+    def add_voting_item(self, case_number: str, name: str, description: str = None) -> bool:
+        """新增投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM voting_items WHERE id = ?", (item_id,))
+        try:
+            cursor.execute("""
+                INSERT INTO voting_items (case_number, name, description)
+                VALUES (?, ?, ?)
+            """, (case_number, name, description))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+
+    def delete_voting_item(self, case_number: str) -> bool:
+        """刪除投票項目"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM voting_items WHERE case_number = ?", (case_number,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception:
+            conn.close()
+            return False
+
+    def get_voting_item(self, case_number: str) -> Optional[Dict]:
+        """通過案號獲取投票項目"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def get_all_voting_items(self) -> List[Dict]:
+        """獲取所有投票項目"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM voting_items ORDER BY case_number")
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    # ─────────────────────────── 投票管理 ───────────────────────────
+
+    def record_vote(self, household_id: str, case_number: str, vote: str,
+                    device_id: str = None) -> bool:
+        """記錄投票（戶號+案號為複合主鍵，每個戶號每個案號只能投票一次）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO votes (household_id, case_number, vote, device_id)
+                VALUES (?, ?, ?, ?)
+            """, (household_id, case_number, vote, device_id))
+            # 更新住戶狀態
+            cursor.execute("""
+                UPDATE households SET status = 'voted'
+                WHERE household_id = ?
+            """, (household_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+        except sqlite3.Error as e:
+            conn.close()
+            print(f"投票記錄錯誤: {e}")
+            return False
+
+    def has_voted(self, household_id: str, case_number: str) -> bool:
+        """檢查是否已投票"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 1 FROM votes WHERE household_id = ? AND case_number = ?
+        """, (household_id, case_number))
+        row = cursor.fetchone()
+        conn.close()
+        return row is not None
+
+    def get_voting_results(self, case_number: str) -> Dict:
+        """獲取某案號的投票結果"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM voting_items WHERE case_number = ?", (case_number,))
         item = cursor.fetchone()
-        
         if not item:
+            conn.close()
             return {}
-        
+
         cursor.execute("""
             SELECT vote, COUNT(*) as count
             FROM votes
-            WHERE item_id = ?
+            WHERE case_number = ?
             GROUP BY vote
-        """, (item_id,))
-        
+        """, (case_number,))
+
         rows = cursor.fetchall()
         conn.close()
-        
-        result = {'item_name': item['name'], 'votes': {}}
+
+        result = {'case_number': case_number, 'item_name': item['name'], 'votes': {}}
         total = 0
-        
         for row in rows:
             result['votes'][row['vote']] = row['count']
             total += row['count']
-        
+
         result['total'] = total
         return result
-    
+
+    def get_all_voting_results(self) -> List[Dict]:
+        """獲取所有投票項目的結果"""
+        items = self.get_all_voting_items()
+        return [self.get_voting_results(item['case_number']) for item in items]
+
+    # ─────────────────────────── 舊版兼容（投票者表） ───────────────────────────
+
+    def add_voter(self, voter_id: str, barcode: str, name: str = None) -> bool:
+        """添加投票者（向後兼容，使用 household_id）"""
+        return self.add_household(voter_id, name or voter_id)
+
+    def get_voter(self, barcode: str) -> Optional[Dict]:
+        """通過條碼（戶號）獲取住戶"""
+        return self.get_household(barcode)
+
+    def check_in_voter(self, voter_id: str, barcode: str = None, device_id: str = None) -> bool:
+        """報到（向後兼容）"""
+        return self.check_in_household(voter_id, device_id)
+
+    # ─────────────────────────── 數據導出 ───────────────────────────
+
     def export_data(self, export_path: str = "exports/data.json") -> bool:
         """導出所有數據"""
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
-            
+
             config = self.get_config()
-            
+
+            cursor.execute("SELECT * FROM households")
+            households = [dict(row) for row in cursor.fetchall()]
+
             cursor.execute("SELECT * FROM check_in_records")
             check_in_records = [dict(row) for row in cursor.fetchall()]
-            
+
             cursor.execute("SELECT * FROM voting_items")
             voting_items = [dict(row) for row in cursor.fetchall()]
-            
+
             cursor.execute("SELECT * FROM votes")
             votes = [dict(row) for row in cursor.fetchall()]
-            
+
             conn.close()
-            
+
             export_data = {
                 'config': config,
+                'households': households,
                 'check_in_records': check_in_records,
                 'voting_items': voting_items,
                 'votes': votes,
                 'exported_at': datetime.now().isoformat()
             }
-            
+
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(export_path, 'w', encoding='utf-8') as f:
                 json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
-            
+
             return True
         except Exception as e:
             print(f"數據導出錯誤: {e}")
             return False
-    
+
     def clear_all_data(self):
         """清空所有數據"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("DELETE FROM votes")
         cursor.execute("DELETE FROM check_in_records")
-        cursor.execute("DELETE FROM voters")
+        cursor.execute("DELETE FROM households")
         cursor.execute("DELETE FROM voting_items")
         cursor.execute("DELETE FROM config")
-        
         conn.commit()
         conn.close()
+
+    def clear_household_data(self):
+        """清空所有住戶及相關投票/報到記錄（保留投票項目和系統配置）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM votes")
+        cursor.execute("DELETE FROM check_in_records")
+        cursor.execute("DELETE FROM households")
+        conn.commit()
+        conn.close()
+

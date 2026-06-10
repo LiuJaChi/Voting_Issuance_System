@@ -5,27 +5,26 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from src.backend.database import Database
-from src.backend.utils import format_datetime
+from src.backend.utils import format_datetime, parse_check_in_barcode
 
 
 class CheckInWindow(QWidget):
-    """報到窗口"""
-    
+    """報到窗口（掃描報到單條碼，以戶號進行報到）"""
+
     def __init__(self, parent=None):
         """初始化報到窗口"""
         super().__init__(parent)
         self.db = Database()
-        
         self.init_ui()
-    
+
     def init_ui(self):
         """初始化用戶界面"""
         main_layout = QVBoxLayout()
-        
+
         # 標題
         title = QLabel("報到管理")
         title_font = QFont()
@@ -33,142 +32,151 @@ class CheckInWindow(QWidget):
         title_font.setBold(True)
         title.setFont(title_font)
         main_layout.addWidget(title)
-        
+
         # 統計信息
         stats_layout = QHBoxLayout()
-        
-        self.total_label = QLabel("預期出席: 0")
+        self.total_label = QLabel("總住戶: 0")
         self.checked_label = QLabel("已報到: 0")
-        self.percentage_label = QLabel("出席率: 0%")
-        
+        self.percentage_label = QLabel("報到率: 0%")
         stats_layout.addWidget(self.total_label)
         stats_layout.addWidget(self.checked_label)
         stats_layout.addWidget(self.percentage_label)
         stats_layout.addStretch()
-        
         main_layout.addLayout(stats_layout)
-        
+
         # 條碼掃描輸入
         scan_layout = QHBoxLayout()
-        scan_layout.addWidget(QLabel("掃描條碼:"))
+        scan_layout.addWidget(QLabel("掃描報到單條碼:"))
         self.barcode_input = QLineEdit()
-        self.barcode_input.setPlaceholderText("請掃描條碼...")
+        self.barcode_input.setPlaceholderText("請掃描報到單條碼（戶號）...")
         self.barcode_input.returnPressed.connect(self.process_check_in)
         scan_layout.addWidget(self.barcode_input)
-        
         main_layout.addLayout(scan_layout)
-        
+
         # 報到記錄表
         self.check_in_table = QTableWidget()
         self.check_in_table.setColumnCount(4)
         self.check_in_table.setHorizontalHeaderLabels(
-            ["投票者ID", "條碼", "報到時間", "狀態"]
+            ["戶號", "姓名", "報到時間", "狀態"]
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
+            0, QHeaderView.ResizeMode.ResizeToContents
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
         main_layout.addWidget(self.check_in_table)
-        
+
         # 按鈕佈局
         button_layout = QHBoxLayout()
-        
+
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh_check_in_list)
         button_layout.addWidget(refresh_button)
-        
+
         export_button = QPushButton("導出報到記錄")
         export_button.clicked.connect(self.export_check_in_data)
         button_layout.addWidget(export_button)
-        
+
         clear_button = QPushButton("清空數據")
         clear_button.clicked.connect(self.clear_check_in_data)
         button_layout.addWidget(clear_button)
-        
+
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
-        
+
         self.setLayout(main_layout)
-        
-        # 初始化數據
         self.refresh_check_in_list()
-    
+
     def process_check_in(self):
-        """處理報到"""
-        barcode = self.barcode_input.text().strip()
-        
-        if not barcode:
+        """處理報到：掃描報到單條碼（戶號）"""
+        raw = self.barcode_input.text().strip()
+        self.barcode_input.clear()
+
+        if not raw:
             QMessageBox.warning(self, "警告", "請輸入條碼")
             return
-        
-        # 查找投票者
-        voter = self.db.get_voter(barcode)
-        if not voter:
-            QMessageBox.critical(self, "錯誤", f"條碼 {barcode} 不存在")
-            self.barcode_input.clear()
+
+        household_id = parse_check_in_barcode(raw)
+        if not household_id:
+            QMessageBox.critical(self, "錯誤", f"無法解析條碼：{raw}")
             return
-        
+
+        # 查找住戶
+        household = self.db.get_household(household_id)
+        if not household:
+            QMessageBox.critical(self, "錯誤", f"戶號 {household_id} 不存在，請先新增住戶")
+            return
+
+        if household['status'] == 'checked_in' or household['status'] == 'voted':
+            QMessageBox.warning(
+                self, "提示",
+                f"戶號 {household_id}（{household['name']}）已完成報到"
+            )
+            return
+
         # 執行報到
-        if self.db.check_in_voter(voter['voter_id'], barcode):
-            QMessageBox.information(self, "成功", f"投票者 {voter['voter_id']} 報到成功")
-            self.barcode_input.clear()
+        if self.db.check_in_household(household_id):
+            QMessageBox.information(
+                self, "報到成功",
+                f"戶號：{household_id}\n姓名：{household['name']}\n報到成功！"
+            )
             self.refresh_check_in_list()
         else:
-            QMessageBox.critical(self, "錯誤", "報到失敗，此投票者已報到或發生錯誤")
-            self.barcode_input.clear()
-    
+            QMessageBox.critical(self, "錯誤", "報到失敗，請稍後再試")
+
     def refresh_check_in_list(self):
         """刷新報到列表"""
-        # 更新統計信息
         stats = self.db.get_check_in_stats()
-        if stats:
-            self.total_label.setText(f"預期出席: {stats.get('total_expected', 0)}")
-            self.checked_label.setText(f"已報到: {stats.get('checked_in', 0)}")
-            self.percentage_label.setText(f"出席率: {stats.get('percentage', 0)}%")
-        
-        # 更新表格
+        self.total_label.setText(f"總住戶: {stats.get('total_expected', 0)}")
+        self.checked_label.setText(f"已報到: {stats.get('checked_in', 0)}")
+        self.percentage_label.setText(f"報到率: {stats.get('percentage', 0)}%")
+
         self.check_in_table.setRowCount(0)
-        
+
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        
         cursor.execute("""
-            SELECT v.voter_id, v.barcode, c.checked_in_at, v.status
-            FROM voters v
-            LEFT JOIN check_in_records c ON v.voter_id = c.voter_id
-            ORDER BY c.checked_in_at DESC
+            SELECT h.household_id, h.name, c.checked_in_at, h.status
+            FROM households h
+            LEFT JOIN check_in_records c ON h.household_id = c.household_id
+            ORDER BY h.household_id
         """)
-        
         rows = cursor.fetchall()
         conn.close()
-        
+
         for row in rows:
             row_position = self.check_in_table.rowCount()
             self.check_in_table.insertRow(row_position)
-            
             self.check_in_table.setItem(row_position, 0, QTableWidgetItem(row[0]))
-            self.check_in_table.setItem(row_position, 1, QTableWidgetItem(row[1]))
-            
+            self.check_in_table.setItem(row_position, 1, QTableWidgetItem(row[1] or ""))
             checked_in_at = format_datetime(row[2]) if row[2] else "未報到"
             self.check_in_table.setItem(row_position, 2, QTableWidgetItem(checked_in_at))
-            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(row[3]))
-    
+            status_map = {'pending': '待報到', 'checked_in': '已報到', 'voted': '已投票'}
+            self.check_in_table.setItem(
+                row_position, 3,
+                QTableWidgetItem(status_map.get(row[3], row[3]))
+            )
+
     def export_check_in_data(self):
         """導出報到數據"""
         if self.db.export_data():
             QMessageBox.information(self, "成功", "數據已導出到 exports/data.json")
         else:
             QMessageBox.critical(self, "錯誤", "數據導出失敗")
-    
+
     def clear_check_in_data(self):
         """清空報到數據"""
         reply = QMessageBox.question(
             self, "確認", "確定要清空所有數據嗎？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
         if reply == QMessageBox.StandardButton.Yes:
             self.db.clear_all_data()
             self.refresh_check_in_list()

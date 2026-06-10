@@ -1,17 +1,16 @@
 """
-投票者數據模型
+住戶數據模型
 """
 from typing import Optional
 from pydantic import BaseModel
 from datetime import datetime
 
 
-class VoterModel(BaseModel):
-    """投票者模型（以戶號為主鍵）"""
-    household_id: str        # 戶號，例如 06-02F（作為主鍵）
-    name: str                # 姓名
+class HouseholdModel(BaseModel):
+    """住戶模型"""
+    household_id: str  # 戶號，例如 06-02F
+    name: str          # 姓名
     status: str = "pending"  # pending, checked_in, voted
-    checked_in_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -20,7 +19,6 @@ class VoterModel(BaseModel):
                 "household_id": "06-02F",
                 "name": "李某",
                 "status": "pending",
-                "checked_in_at": None,
                 "created_at": "2024-06-10T10:00:00"
             }
         }
