@@ -4,8 +4,9 @@
 import sys
 from pathlib import Path
 
-# 設置項目路徑
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# 設置項目路徑 - 添加當前目錄到 Python 路徑
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 from PyQt6.QtWidgets import QApplication
 from src.ui.main_window import MainWindow
