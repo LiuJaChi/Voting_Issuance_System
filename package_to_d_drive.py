@@ -133,17 +133,16 @@ def main():
     print_step(5, 5, "創建説明文檔")
     
     readme_content = f"""# 投票系統 - 源代碼包
-    
-## 📦 包信息
 
-- **打包時間**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-- **版本**: main branch (2026-06-10)
-- **文件數量**: {file_count}
-- **包大小**: {size_mb:.2f} MB
+## 包信息
 
-## 📂 目錄結構
+- 打包時間: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+- 版本: main branch (2026-06-10)
+- 文件數量: {file_count}
+- 包大小: {size_mb:.2f} MB
 
-```
+## 目錄結構
+
 Voting_Issuance_System/
 ├── src/                           # 源代碼
 │   ├── backend/                   # 後端模塊
@@ -158,97 +157,88 @@ Voting_Issuance_System/
 ├── Voting_Issuance_System.spec   # PyInstaller 配置
 ├── clean_build.py                 # 清潔打包腳本
 └── README.md                      # 文檔
-```
 
-## 🚀 快速開始
+## 快速開始
 
 ### 1. 安裝依賴
 
-```bash
 pip install -r requirements.txt
-```
 
 ### 2. 直接運行
 
-```bash
 python src/main.py
-```
 
 ### 3. 打包為 EXE
 
-```bash
 python clean_build.py
-```
 
-## 📋 功能特性
+## 功能特性
 
-✅ **住戶管理**
-- 戶號管理（以戶號為主鍵）
-- 批量導入住戶
-- 住戶資料查詢
+✓ 住戶管理
+  - 戶號管理（以戶號為主鍵）
+  - 批量導入住戶
+  - 住戶資料查詢
 
-✅ **報到管理**
-- 條碼掃描報到
-- 報到統計
-- 報到歷史紀錄
+✓ 報到管理
+  - 條碼掃描報到
+  - 報到統計
+  - 報到歷史紀錄
 
-✅ **投票管理**
-- 案號管理（以案號為唯一標識）
-- 投票紀錄（戶號+案號複合主鍵）
-- 投票結果統計
+✓ 投票管理
+  - 案號管理（以案號為唯一標識）
+  - 投票紀錄（戶號+案號複合主鍵）
+  - 投票結果統計
 
-✅ **數據管理**
-- 數據導出 (JSON)
-- 數據清空
-- 備份恢復
+✓ 數據管理
+  - 數據導出 (JSON)
+  - 數據清空
+  - 備份恢復
 
-## 🗄️ 數據庫架構
+## 數據庫架構
 
 ### households 表
-- `household_id` (TEXT PRIMARY KEY) - 戶號
-- `name` (TEXT) - 住戶名稱
-- `status` (TEXT) - 狀態 (pending/checked_in/voted)
-- `created_at` (TIMESTAMP) - 創建時間
+- household_id (TEXT PRIMARY KEY) - 戶號
+- name (TEXT) - 住戶名稱
+- status (TEXT) - 狀態 (pending/checked_in/voted)
+- created_at (TIMESTAMP) - 創建時間
 
 ### voting_items 表
-- `id` (INTEGER PRIMARY KEY) - 內部 ID
-- `case_number` (TEXT UNIQUE) - 案號
-- `name` (TEXT) - 項目名稱
-- `description` (TEXT) - 項目描述
-- `created_at` (TIMESTAMP) - 創建時間
+- id (INTEGER PRIMARY KEY) - 內部 ID
+- case_number (TEXT UNIQUE) - 案號
+- name (TEXT) - 項目名稱
+- description (TEXT) - 項目描述
+- created_at (TIMESTAMP) - 創建時間
 
 ### votes 表
-- `household_id` (TEXT) - 戶號
-- `case_number` (TEXT) - 案號
-- `vote` (TEXT) - 投票結果
-- `voted_at` (TIMESTAMP) - 投票時間
+- household_id (TEXT) - 戶號
+- case_number (TEXT) - 案號
+- vote (TEXT) - 投票結果
+- voted_at (TIMESTAMP) - 投票時間
 - PRIMARY KEY: (household_id, case_number)
 
 ### check_in_records 表
-- `household_id` (TEXT PRIMARY KEY) - 戶號
-- `checked_in_at` (TIMESTAMP) - 報到時間
-- `device_id` (TEXT) - 設備 ID
+- household_id (TEXT PRIMARY KEY) - 戶號
+- checked_in_at (TIMESTAMP) - 報到時間
+- device_id (TEXT) - 設備 ID
 
-## 🔧 系統要求
+## 系統要求
 
 - Python 3.8+
 - Windows / macOS / Linux
 - 3GB 硬盤空間（含虛擬環境）
 
-## 📞 支持
+## 支持
 
 如有問題，請聯繫開發人員
 
----
-
-**打包日期**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+打包日期: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 """
     
     try:
-        readme_file = package_dir / "PACKAGE_INFO.md"
+        readme_file = package_dir / "PACKAGE_INFO.txt"
         with open(readme_file, 'w', encoding='utf-8') as f:
             f.write(readme_content)
-        print(f"    ✓ 創建說明文檔: PACKAGE_INFO.md\n")
+        print(f"    ✓ 創建說明文檔: PACKAGE_INFO.txt\n")
     except Exception as e:
         print(f"    ⚠️  創建說明文檔失敗: {e}\n")
     
@@ -264,12 +254,12 @@ python clean_build.py
     print(f"   ✓ 依賴列表 (requirements.txt)")
     print(f"   ✓ PyInstaller 配置 (.spec)")
     print(f"   ✓ 打包腳本 (clean_build.py)")
-    print(f"   ✓ 說明文檔 (PACKAGE_INFO.md)\n")
+    print(f"   ✓ 說明文檔 (PACKAGE_INFO.txt)\n")
     
     print(f"🚀 下一步:")
     print(f"1. 打開 D 盤: {d_drive}")
     print(f"2. 進入文件夾: {package_name}")
-    print(f"3. 閱讀 PACKAGE_INFO.md 瞭解詳情\n")
+    print(f"3. 閱讀 PACKAGE_INFO.txt 瞭解詳情\n")
     
     # 打開資源管理器
     try:
