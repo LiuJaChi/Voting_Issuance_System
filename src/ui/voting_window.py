@@ -151,7 +151,7 @@ class VotingWindow(QWidget):
             QMessageBox.information(self, "成功", "投票已記錄")
             self.refresh_voting_items()
         else:
-            QMessageBox.critical(self, "錯誤", "投票記錄失敗，可能是重複投票")
+            QMessageBox.critical(self, "錯誤", "投票記錄失敗，請確認案號資料與資料庫狀態")
             self.refresh_voting_items()
 
     def export_voting_data(self):

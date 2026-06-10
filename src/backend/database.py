@@ -320,7 +320,7 @@ class Database:
                     household_key = find_key(fieldnames, 'household_id')
                     name_key = find_key(fieldnames, 'name')
                     if not household_key or not name_key:
-                        raise ValueError('CSV 必須包含 household_id/戶號 與 name/姓名 欄位')
+                        raise ValueError('CSV 必須包含 household_id（或 戶號/戶別）與 name（或 姓名/戶名）欄位')
 
                     inserted = 0
                     skipped = 0
@@ -339,7 +339,7 @@ class Database:
                 last_error = exc
                 continue
 
-        raise ValueError(str(last_error) if last_error else 'CSV 編碼不支援或檔案內容無法讀取')
+        raise ValueError(str(last_error) if last_error else 'CSV 編碼不支援或檔案內容無法讀取；已嘗試 utf-8-sig、utf-8、cp950、big5')
 
     def get_voter(self, barcode: str) -> Optional[Dict]:
         conn = self.get_connection()
