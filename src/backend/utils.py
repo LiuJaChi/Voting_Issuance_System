@@ -7,13 +7,13 @@ from typing import List
 
 
 def generate_voter_id(prefix: str = "VOTER", index: int = 1) -> str:
-    """生成投票者 ID"""
+    """生成內部流水號"""
     return f"{prefix}{index:05d}"
 
 
-def generate_barcode(voter_id: str) -> str:
-    """根據投票者 ID 生成條碼"""
-    return voter_id
+def generate_barcode(household_id: str) -> str:
+    """根據戶號生成條碼內容"""
+    return (household_id or "").strip().upper()
 
 
 def hash_barcode(barcode: str) -> str:
@@ -39,18 +39,18 @@ def get_current_timestamp() -> str:
 
 
 def batch_generate_voter_ids(count: int, prefix: str = "VOTER") -> List[str]:
-    """批量生成投票者 ID"""
+    """批量生成內部流水號"""
     return [generate_voter_id(prefix, i) for i in range(1, count + 1)]
 
 
-def batch_generate_barcodes(voter_ids: List[str]) -> List[str]:
-    """批量生成條碼"""
-    return [generate_barcode(voter_id) for voter_id in voter_ids]
+def batch_generate_barcodes(household_ids: List[str]) -> List[str]:
+    """批量生成戶號條碼內容"""
+    return [generate_barcode(household_id) for household_id in household_ids]
 
 
 def validate_barcode(barcode: str) -> bool:
     """驗證條碼格式"""
-    return bool(barcode) and len(barcode) > 0
+    return bool((barcode or "").strip())
 
 
 def validate_vote(vote: str) -> bool:
@@ -63,6 +63,6 @@ def normalize_vote(vote: str) -> str:
     vote_lower = vote.lower()
     if vote_lower in ['yes', '贊成']:
         return 'yes'
-    elif vote_lower in ['no', '反對']:
+    if vote_lower in ['no', '反對']:
         return 'no'
     return vote_lower

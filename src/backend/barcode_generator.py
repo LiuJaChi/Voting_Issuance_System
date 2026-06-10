@@ -1,53 +1,49 @@
 """
 條碼生成模塊
 """
-import barcode
-from barcode.writer import ImageWriter
+import re
 from pathlib import Path
 from typing import List
 
+import barcode
+from barcode.writer import ImageWriter
+
 
 class BarcodeGenerator:
-    """Code128 條碼生成器"""
-    
+    """Code39 條碼生成器"""
+
+    CODE39_PATTERN = re.compile(r'^[0-9A-Z \-\.\$/\+%]+$')
+
     def __init__(self, output_dir: str = "exports/barcodes"):
         """初始化條碼生成器"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
+
+    @staticmethod
+    def normalize_barcode_data(barcode_data: str) -> str:
+        """規範化條碼內容"""
+        normalized = (barcode_data or "").strip().upper()
+        if not normalized:
+            raise ValueError("條碼內容不可為空")
+        if not BarcodeGenerator.CODE39_PATTERN.fullmatch(normalized):
+            raise ValueError("Code39 僅支援英數大寫及 - . $ / + % 空白")
+        return normalized
+
     def generate_barcode(self, barcode_data: str, filename: str = None) -> str:
-        """
-        生成單個條碼
-        
-        Args:
-            barcode_data: 條碼數據
-            filename: 輸出文件名（不含副檔名）
-        
-        Returns:
-            條碼文件路徑
-        """
+        """生成單個條碼"""
+        barcode_data = self.normalize_barcode_data(barcode_data)
         if not filename:
-            filename = f"barcode_{barcode_data}"
-        
+            safe_name = re.sub(r'[^0-9A-Z\-]+', '_', barcode_data)
+            filename = f"barcode_{safe_name}"
+
         filepath = str(Path(self.output_dir) / filename)
-        
-        # 生成 Code128 條碼
-        code128 = barcode.get_barcode_class('code128')
-        bar = code128(barcode_data, writer=ImageWriter())
+        code39 = barcode.get_barcode_class('code39')
+        bar = code39(barcode_data, writer=ImageWriter(), add_checksum=False)
         bar.save(filepath)
-        
         return f"{filepath}.png"
-    
+
     def generate_batch_barcodes(self, barcode_list: List[str]) -> List[str]:
-        """
-        批量生成條碼
-        
-        Args:
-            barcode_list: 條碼數據列表
-        
-        Returns:
-            生成的條碼文件路徑列表
-        """
+        """批量生成條碼"""
         paths = []
         for barcode_data in barcode_list:
             try:
@@ -55,23 +51,8 @@ class BarcodeGenerator:
                 paths.append(path)
             except Exception as e:
                 print(f"條碼生成失敗 {barcode_data}: {e}")
-        
         return paths
-    
-    def generate_voter_barcodes(self, voter_count: int, prefix: str = "VOTER") -> List[str]:
-        """
-        為投票者生成條碼
-        
-        Args:
-            voter_count: 投票者數量
-            prefix: 條碼前綴
-        
-        Returns:
-            條碼列表
-        """
-        barcodes = []
-        for i in range(1, voter_count + 1):
-            barcode_data = f"{prefix}{i:05d}"
-            barcodes.append(barcode_data)
-        
-        return barcodes
+
+    def generate_voter_barcodes(self, household_ids: List[str]) -> List[str]:
+        """為戶號生成條碼內容列表"""
+        return [self.normalize_barcode_data(household_id) for household_id in household_ids if str(household_id).strip()]
