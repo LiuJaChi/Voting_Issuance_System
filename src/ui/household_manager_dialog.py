@@ -262,12 +262,6 @@ class HouseholdManagerDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM check_in_records")
-            cursor.execute("DELETE FROM votes")
-            cursor.execute("DELETE FROM households")
-            conn.commit()
-            conn.close()
+            self.db.clear_household_data()
             self.refresh_households()
             QMessageBox.information(self, "成功", "所有住戶資料已清空")

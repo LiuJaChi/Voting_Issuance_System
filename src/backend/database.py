@@ -416,3 +416,13 @@ class Database:
         conn.commit()
         conn.close()
 
+    def clear_household_data(self):
+        """清空所有住戶及相關投票/報到記錄（保留投票項目和系統配置）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM votes")
+        cursor.execute("DELETE FROM check_in_records")
+        cursor.execute("DELETE FROM households")
+        conn.commit()
+        conn.close()
+

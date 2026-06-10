@@ -22,6 +22,9 @@ class VotingWindow(QWidget):
         super().__init__(parent)
         self.db = Database()
         self.config_manager = ConfigManager()
+        self._current_household_id = None
+        self._current_case_number = None
+        self._current_household_name = None
         self.init_ui()
 
     def init_ui(self):
@@ -129,10 +132,6 @@ class VotingWindow(QWidget):
         main_layout.addLayout(button_layout)
 
         self.setLayout(main_layout)
-
-        self._current_household_id = None
-        self._current_case_number = None
-        self._current_household_name = None
 
         self.refresh_vote_records()
 
