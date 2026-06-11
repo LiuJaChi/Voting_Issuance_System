@@ -5,7 +5,7 @@
 - Code128 內容：戶號（例如 A106-02）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + Code128 條碼（只顯示戶號）
+- 內容：戶號 + 姓名 + Code128 字型顯示條碼
 
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
@@ -13,15 +13,12 @@ import io
 from pathlib import Path
 from typing import List, Dict
 
-import barcode
-from barcode.writer import ImageWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import Image as RLImage
 
 try:
     import openpyxl
@@ -54,42 +51,6 @@ class CheckInPrinter:
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def _generate_code128_image(content: str) -> io.BytesIO:
-        """
-        生成 Code128 條碼圖片，返回 BytesIO 流
-        
-        Code128 只支持 ASCII 字符，不能包含中文
-        
-        Args:
-            content: Code128 內容（例如 A106-02）
-            
-        Returns:
-            BytesIO 流
-        """
-        buf = io.BytesIO()
-        
-        try:
-            # 生成 Code128 條碼 - 不顯示下方文字，避免中文問題
-            code128_class = barcode.get_barcode_class('code128')
-            writer = ImageWriter()
-            bar = code128_class(content, writer=writer, add_checksum=False)
-            
-            options = {
-                'module_width': 0.5,      # 條碼寬度
-                'module_height': 15.0,    # 條碼高度
-                'font_size': 0,           # 不顯示文字
-                'text_distance': 0,       # 文字距離
-            }
-            
-            bar.write(buf, options=options)
-            buf.seek(0)
-            
-            return buf
-        except Exception as e:
-            print(f"Code128 條碼生成失敗 {content}: {e}")
-            raise
-
     def generate_pdf(
         self,
         households: List[Dict],
@@ -99,10 +60,10 @@ class CheckInPrinter:
         生成報到單 PDF
         
         報到單格式：
-        戶號 + 姓名 + Code128 條碼（戶號）
+        戶號 + 姓名 + Code128 字型顯示條碼
         
         Args:
-            households: [{'household_id': 'A106-02', 'name': '洪正平', 'barcode': 'A106-02'}, ...]
+            households: [{'household_id': 'A106-02', 'name': '洪正平'}, ...]
             filename: 輸出文件名
             
         Returns:
@@ -123,20 +84,36 @@ class CheckInPrinter:
         )
 
         styles = getSampleStyleSheet()
-        center_style = ParagraphStyle(
-            'Center',
+        
+        # 戶號樣式
+        household_id_style = ParagraphStyle(
+            'HouseholdID',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=9,
-            leading=11,
+            fontSize=10,
+            leading=12,
+            fontName='Helvetica-Bold',
         )
-        id_style = ParagraphStyle(
-            'ID',
+        
+        # 姓名樣式
+        name_style = ParagraphStyle(
+            'Name',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=7,
-            leading=9,
+            fontSize=8,
+            leading=10,
             textColor=colors.HexColor('#333333'),
+        )
+        
+        # Code128 字型樣式（使用 Code128 字體顯示條碼）
+        code128_style = ParagraphStyle(
+            'Code128',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
+            fontSize=16,
+            leading=18,
+            fontName='Code128',  # 使用 Code128 字型
+            textColor=colors.HexColor('#000000'),
         )
 
         # 每個標籤的寬度
@@ -152,22 +129,13 @@ class CheckInPrinter:
         for household in households:
             household_id = household['household_id']
             name = household['name']
-            # 條碼內容使用戶號
-            barcode_str = household_id
             
-            # 生成 Code128 條碼圖片（使用戶號）
-            try:
-                code128_buf = self._generate_code128_image(barcode_str)
-                code128_img = RLImage(code128_buf, width=cell_w * 0.85, height=15 * mm)
-            except Exception as e:
-                print(f"Code128 生成失敗 {barcode_str}: {e}")
-                code128_img = Paragraph(f"條碼: {barcode_str}", id_style)
-
-            # 單元格內容：戶號、姓名、條碼
+            # 使用 Code128 字型顯示條碼
+            # Code128 字型會自動將文字轉換為條碼格式
             cell_content = [
-                Paragraph(f"<b>{household_id}</b>", center_style),
-                Paragraph(name, id_style),
-                code128_img,
+                Paragraph(f"<b>{household_id}</b>", household_id_style),
+                Paragraph(name, name_style),
+                Paragraph(household_id, code128_style),  # 用 Code128 字型顯示
             ]
 
             row_cells.append(cell_content)
