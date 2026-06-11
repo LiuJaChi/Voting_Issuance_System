@@ -1,5 +1,5 @@
 """
-條碼生成模塊 - 使用 python-barcode 生成 Code128 條碼
+條碼生成模塊 - 使用 python-barcode 生成 EAN-13 條碼
 """
 import barcode
 from barcode.writer import ImageWriter
@@ -8,24 +8,50 @@ from typing import List, Tuple
 import os
 
 
-class CustomImageWriter(ImageWriter):
-    """自訂 ImageWriter - 正確顯示條碼底部文字"""
-    
-    def _text(self, code):
-        """
-        覆寫文字方法，使用正確的條碼數據而不是處理過的格式
-        """
-        # 返回原始的條碼數據作為文字標籤
-        return code
-
-
 class BarcodeGenerator:
-    """使用 python-barcode 生成 Code128 條碼"""
+    """使用 python-barcode 生成 EAN-13 條碼"""
 
     def __init__(self, output_dir: str = "exports/barcodes"):
         """初始化條碼生成器"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _convert_to_ean13(data: str) -> str:
+        """
+        將任意字符串轉換為 EAN-13 格式（13 位數字）
+        
+        轉換規則：
+        - 取前 12 位字符，轉換為數字
+        - 計算第 13 位校驗碼
+        
+        Args:
+            data: 輸入數據（例如：06-02F）
+        
+        Returns:
+            13 位 EAN-13 編碼字符串
+        """
+        # 移除非數字字符，只保留數字
+        digits_only = ''.join(c for c in data if c.isdigit())
+        
+        # 如果沒有數字，使用原始數據的 ASCII 值轉換
+        if not digits_only:
+            # 使用原始數據的每個字符 ASCII 值模 10 得到數字
+            digits_only = ''.join(str(ord(c) % 10) for c in data)
+        
+        # 取前 12 位，不足則補 0
+        ean_base = (digits_only + '0' * 12)[:12]
+        
+        # 計算 EAN-13 校驗碼
+        total = 0
+        for i, digit in enumerate(ean_base):
+            weight = 1 if i % 2 == 0 else 3
+            total += int(digit) * weight
+        
+        checksum = (10 - (total % 10)) % 10
+        ean13 = ean_base + str(checksum)
+        
+        return ean13
 
     def generate_barcode_image(self, barcode_data: str, filename: str = None) -> str:
         """
@@ -45,11 +71,12 @@ class BarcodeGenerator:
         filepath = os.path.join(self.output_dir, filename)
         
         try:
-            # 生成 Code128 條碼，使用自訂 writer 確保文字格式正確
-            code128_class = barcode.get_barcode_class('code128')
+            # 將數據轉換為 EAN-13 格式
+            ean13_data = self._convert_to_ean13(barcode_data)
             
-            # 使用自訂的 CustomImageWriter 以正確顯示條碼數據
-            bar = code128_class(barcode_data, writer=CustomImageWriter())
+            # 生成 EAN-13 條碼
+            ean13_class = barcode.get_barcode_class('ean13')
+            bar = ean13_class(ean13_data, writer=ImageWriter())
             
             # 設置條碼選項
             options = {
@@ -164,8 +191,10 @@ class BarcodeGenerator:
         """為投票者生成條碼（向後兼容）"""
         barcodes = []
         for i in range(1, voter_count + 1):
-            barcode_data = f"{prefix}{i:05d}"
-            barcodes.append(barcode_data)
+            # 轉換為 EAN-13 格式
+            data = f"{prefix}{i:05d}"
+            ean13 = self._convert_to_ean13(data)
+            barcodes.append(ean13)
         return barcodes
 
 
@@ -177,13 +206,15 @@ if __name__ == "__main__":
     print("生成報到條碼...")
     checkin_barcode = generator.generate_household_barcode("06-02F")
     print(f"報到條碼: {checkin_barcode}")
+    print(f"EAN-13 編碼: {generator._convert_to_ean13('06-02F')}")
     
     # 測試投票單條碼
-    print("生成投票單條碼...")
+    print("\n生成投票單條碼...")
     ballot_barcode = generator.generate_voting_ballot_barcode("06-02F", "001")
     print(f"投票單條碼: {ballot_barcode}")
+    print(f"EAN-13 編碼: {generator._convert_to_ean13('06-02F_001')}")
     
     # 測試條碼解析
-    print("測試條碼解析...")
+    print("\n測試條碼解析...")
     result = BarcodeGenerator.parse_ballot_barcode("06-02F_001")
     print(f"解析結果: {result}")
