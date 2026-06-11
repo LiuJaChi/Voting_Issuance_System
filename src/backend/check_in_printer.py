@@ -2,14 +2,16 @@
 報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code39 條碼
 
 報到單規格：
-- Code39 內容：原始條碼（例如 虐乙）
+- Code39 內容：原始條碼（例如 A106-02）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
 - 內容：戶號 + 姓名 + Code39 條碼
+
+報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 原始條碼
 """
 import io
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
 import barcode
 from barcode.writer import ImageWriter
@@ -95,7 +97,7 @@ class CheckInPrinter:
         生成報到單 PDF
         
         Args:
-            households: [{'household_id': 'A106-02', 'name': '王先生', 'barcode': '虐乙'}, ...]
+            households: [{'household_id': 'A106-02', 'name': '洪正平', 'barcode': 'A106-02'}, ...]
             filename: 輸出文件名
             
         Returns:
@@ -200,8 +202,10 @@ class CheckInPrinter:
         """
         導出報到條碼到 Excel 文件
         
+        格式：戶號 | 戶名 | 面積（坪） | 原始條碼
+        
         Args:
-            households: [{'household_id': 'A106-02', 'name': '王先生', 'barcode': '虐乙'}, ...]
+            households: [{'household_id': 'A106-02', 'name': '洪正平', 'share_amount': 129.03, 'barcode': 'A106-02'}, ...]
             filename: 輸出文件名（默認為 報到.xlsx）
             
         Returns:
@@ -218,35 +222,59 @@ class CheckInPrinter:
             worksheet.title = '報到'
             
             # 設置列寬
-            worksheet.column_dimensions['A'].width = 15
-            worksheet.column_dimensions['B'].width = 20
-            worksheet.column_dimensions['C'].width = 25
+            worksheet.column_dimensions['A'].width = 12
+            worksheet.column_dimensions['B'].width = 18
+            worksheet.column_dimensions['C'].width = 15
+            worksheet.column_dimensions['D'].width = 18
             
             # 寫入標題
-            headers = ['戶號', '姓名', '原始條碼']
+            headers = ['戶號', '戶名', '面積（坪）', '原始條碼']
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_font = Font(bold=True, size=11, color="FFFFFF")
+            
             for col_idx, header in enumerate(headers, start=1):
                 cell = worksheet.cell(row=1, column=col_idx, value=header)
-                # 標題樣式
-                cell.font = Font(bold=True, size=11, color="FFFFFF")
-                cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                cell.font = header_font
+                cell.fill = header_fill
                 cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = Border(
+                    left=Side(style='thin'),
+                    right=Side(style='thin'),
+                    top=Side(style='thin'),
+                    bottom=Side(style='thin')
+                )
             
             # 寫入數據
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
             for row_idx, household in enumerate(households, start=2):
-                worksheet.cell(row=row_idx, column=1, value=household['household_id'])
-                worksheet.cell(row=row_idx, column=2, value=household['name'])
-                worksheet.cell(row=row_idx, column=3, value=household.get('barcode', ''))
+                # 戶號
+                cell_a = worksheet.cell(row=row_idx, column=1, value=household['household_id'])
+                cell_a.alignment = Alignment(horizontal='center', vertical='center')
+                cell_a.border = thin_border
                 
-                # 數據行樣式
-                for col_idx in range(1, 4):
-                    cell = worksheet.cell(row=row_idx, column=col_idx)
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                    cell.border = Border(
-                        left=Side(style='thin'),
-                        right=Side(style='thin'),
-                        top=Side(style='thin'),
-                        bottom=Side(style='thin')
-                    )
+                # 戶名
+                cell_b = worksheet.cell(row=row_idx, column=2, value=household['name'])
+                cell_b.alignment = Alignment(horizontal='left', vertical='center')
+                cell_b.border = thin_border
+                
+                # 面積（坪）
+                share_amount = household.get('share_amount', 0.0)
+                cell_c = worksheet.cell(row=row_idx, column=3, value=share_amount)
+                cell_c.alignment = Alignment(horizontal='center', vertical='center')
+                cell_c.number_format = '0.00'
+                cell_c.border = thin_border
+                
+                # 原始條碼
+                barcode_str = household.get('barcode', '')
+                cell_d = worksheet.cell(row=row_idx, column=4, value=barcode_str)
+                cell_d.alignment = Alignment(horizontal='center', vertical='center')
+                cell_d.border = thin_border
             
             # 凍結標題行
             worksheet.freeze_panes = 'A2'
@@ -260,7 +288,8 @@ class CheckInPrinter:
             # 構建 DataFrame
             data = {
                 '戶號': [h['household_id'] for h in households],
-                '姓名': [h['name'] for h in households],
+                '戶名': [h['name'] for h in households],
+                '面積（坪）': [h.get('share_amount', 0.0) for h in households],
                 '原始條碼': [h.get('barcode', '') for h in households]
             }
             df = pd.DataFrame(data)
@@ -271,22 +300,24 @@ class CheckInPrinter:
                 
                 # 設置列寬
                 worksheet = writer.sheets['報到']
-                worksheet.column_dimensions['A'].width = 15
-                worksheet.column_dimensions['B'].width = 20
-                worksheet.column_dimensions['C'].width = 25
+                worksheet.column_dimensions['A'].width = 12
+                worksheet.column_dimensions['B'].width = 18
+                worksheet.column_dimensions['C'].width = 15
+                worksheet.column_dimensions['D'].width = 18
         else:
             # 降級方案：使用 CSV
             import csv
             csv_path = output_path.replace('.xlsx', '.csv')
             
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=['戶號', '姓名', '原始條碼'])
+                writer = csv.DictWriter(f, fieldnames=['戶號', '戶名', '面積（坪）', '原始條碼'])
                 writer.writeheader()
                 
                 for household in households:
                     writer.writerow({
                         '戶號': household['household_id'],
-                        '姓名': household['name'],
+                        '戶名': household['name'],
+                        '面積（坪）': household.get('share_amount', 0.0),
                         '原始條碼': household.get('barcode', '')
                     })
             
