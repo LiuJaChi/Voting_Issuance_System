@@ -1,5 +1,5 @@
 """
-住戶管理對話框
+住戶管理對話框 - 支持 .xlsx 格式
 """
 import csv
 from pathlib import Path
@@ -14,6 +14,19 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from src.backend.database import Database
+
+try:
+    import openpyxl
+    from openpyxl.utils.dataframe import dataframe_to_rows
+    XLSX_AVAILABLE = True
+except ImportError:
+    XLSX_AVAILABLE = False
+    # 嘗試用 pandas 作為備選
+    try:
+        import pandas as pd
+        PANDAS_AVAILABLE = True
+    except ImportError:
+        PANDAS_AVAILABLE = False
 
 
 class HouseholdManagerDialog(QDialog):
@@ -52,10 +65,10 @@ class HouseholdManagerDialog(QDialog):
         search_layout.addStretch()
         main_layout.addLayout(search_layout)
         
-        # 住戶表格
+        # 住戶表格 - 新增 3 列：戶號、原始條碼
         self.household_table = QTableWidget()
         self.household_table.setColumnCount(2)
-        self.household_table.setHorizontalHeaderLabels(["戶號", "姓名"])
+        self.household_table.setHorizontalHeaderLabels(["戶號", "原始條碼"])
         self.household_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
@@ -73,33 +86,22 @@ class HouseholdManagerDialog(QDialog):
         # 按鈕區域
         button_layout = QHBoxLayout()
         
-        # 添加按鈕
-        add_button = QPushButton("新增住戶")
-        add_button.clicked.connect(self.add_household)
-        button_layout.addWidget(add_button)
-        
-        # 編輯按鈕
-        edit_button = QPushButton("編輯住戶")
-        edit_button.clicked.connect(self.edit_household)
-        button_layout.addWidget(edit_button)
-        
-        # 刪除按鈕
-        delete_button = QPushButton("刪除住戶")
-        delete_button.clicked.connect(self.delete_household)
-        button_layout.addWidget(delete_button)
-        
-        # 添加分隔空間
-        button_layout.addSpacing(20)
-        
         # 導入按鈕
-        import_button = QPushButton("導入住戶（CSV）")
-        import_button.clicked.connect(self.import_households)
+        import_button = QPushButton("導入住戶（.xlsx）")
+        import_button.clicked.connect(self.import_households_xlsx)
         button_layout.addWidget(import_button)
         
         # 導出按鈕
-        export_button = QPushButton("導出住戶（CSV）")
-        export_button.clicked.connect(self.export_households)
+        export_button = QPushButton("導出住戶（.xlsx）")
+        export_button.clicked.connect(self.export_households_xlsx)
         button_layout.addWidget(export_button)
+        
+        button_layout.addSpacing(20)
+        
+        # 刷新按鈕
+        refresh_button = QPushButton("刷新")
+        refresh_button.clicked.connect(self.load_households)
+        button_layout.addWidget(refresh_button)
         
         button_layout.addStretch()
         
@@ -117,7 +119,20 @@ class HouseholdManagerDialog(QDialog):
     
     def load_households(self):
         """加載所有住戶"""
-        self.all_households = self.db.get_all_households()
+        # 從數據庫和條碼映射表讀取
+        self.all_households = []
+        
+        households = self.db.get_all_households()
+        for household in households:
+            household_id = household['household_id']
+            # 查詢原始條碼
+            barcode = self.db.get_barcode_by_household_id(household_id)
+            
+            self.all_households.append({
+                'household_id': household_id,
+                'barcode': barcode or ''
+            })
+        
         self.refresh_table(self.all_households)
     
     def refresh_table(self, households: List[Dict]):
@@ -133,10 +148,10 @@ class HouseholdManagerDialog(QDialog):
                 row_position, 0,
                 QTableWidgetItem(household['household_id'])
             )
-            # 姓名
+            # 原始條碼
             self.household_table.setItem(
                 row_position, 1,
-                QTableWidgetItem(household['name'])
+                QTableWidgetItem(household.get('barcode', ''))
             )
     
     def filter_households(self):
@@ -150,156 +165,70 @@ class HouseholdManagerDialog(QDialog):
         filtered = [
             h for h in self.all_households
             if search_text in h['household_id'].lower() or
-               search_text in h['name'].lower()
+               search_text in h.get('barcode', '').lower()
         ]
         
         self.refresh_table(filtered)
     
-    def add_household(self):
-        """添加新住戶"""
-        # 輸入戶號
-        household_id, ok = QInputDialog.getText(
-            self, "新增住戶", "請輸入戶號:"
-        )
-        
-        if not ok or not household_id.strip():
+    def import_households_xlsx(self):
+        """從 .xlsx 文件導入住戶"""
+        if not XLSX_AVAILABLE and not PANDAS_AVAILABLE:
+            QMessageBox.critical(
+                self, "錯誤",
+                "需要安裝 openpyxl 或 pandas 來支持 .xlsx 文件\n\n"
+                "請運行: pip install openpyxl pandas"
+            )
             return
         
-        household_id = household_id.strip()
-        
-        # 檢查戶號是否已存在
-        if self.db.get_household(household_id):
-            QMessageBox.warning(self, "警告", f"戶號 {household_id} 已存在")
-            return
-        
-        # 輸入姓名
-        name, ok = QInputDialog.getText(
-            self, "新增住戶", "請輸入住戶姓名:"
-        )
-        
-        if not ok or not name.strip():
-            return
-        
-        name = name.strip()
-        
-        # 添加到數據庫
-        if self.db.add_household(household_id, name):
-            QMessageBox.information(self, "成功", f"住戶 {household_id} ({name}) 已新增")
-            self.load_households()
-            self.search_input.clear()
-        else:
-            QMessageBox.critical(self, "錯誤", "添加住戶失敗")
-    
-    def edit_household(self):
-        """編輯選中的住戶"""
-        selected_rows = self.household_table.selectionModel().selectedRows()
-        
-        if not selected_rows:
-            QMessageBox.warning(self, "警告", "請選擇要編輯的住戶")
-            return
-        
-        row = selected_rows[0].row()
-        household_id = self.household_table.item(row, 0).text()
-        current_name = self.household_table.item(row, 1).text()
-        
-        # 編輯姓名
-        new_name, ok = QInputDialog.getText(
-            self, "編輯住戶", "請輸入新的住戶姓名:",
-            text=current_name
-        )
-        
-        if not ok or not new_name.strip():
-            return
-        
-        new_name = new_name.strip()
-        
-        # 更新數據庫
-        if self.db.update_household(household_id, new_name):
-            QMessageBox.information(self, "成功", f"住戶 {household_id} 姓名已更新為 {new_name}")
-            self.load_households()
-            self.search_input.clear()
-        else:
-            QMessageBox.critical(self, "錯誤", "編輯住戶失敗")
-    
-    def delete_household(self):
-        """刪除選中的住戶"""
-        selected_rows = self.household_table.selectionModel().selectedRows()
-        
-        if not selected_rows:
-            QMessageBox.warning(self, "警告", "請選擇要刪除的住戶")
-            return
-        
-        row = selected_rows[0].row()
-        household_id = self.household_table.item(row, 0).text()
-        name = self.household_table.item(row, 1).text()
-        
-        # 確認刪除
-        reply = QMessageBox.question(
-            self, "確認刪除",
-            f"確定要刪除住戶 {household_id} ({name}) 嗎？\n\n"
-            f"此操作將同時刪除該住戶的所有報到和投票記錄。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        
-        # 從數據庫刪除
-        if self.db.delete_household(household_id):
-            QMessageBox.information(self, "成功", f"住戶 {household_id} 已刪除")
-            self.load_households()
-            self.search_input.clear()
-        else:
-            QMessageBox.critical(self, "錯誤", "刪除住戶失敗")
-    
-    def import_households(self):
-        """從 CSV 文件導入住戶"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "選擇住戶 CSV 文件",
+            "選擇住戶 .xlsx 文件",
             "",
-            "CSV 文件 (*.csv);;所有文件 (*.*)"
+            "Excel 文件 (*.xlsx);;所有文件 (*.*)"
         )
         
         if not file_path:
             return
         
         try:
-            households = []
-            
-            # 讀取 CSV 文件
-            with open(file_path, 'r', encoding='utf-8-sig') as f:
-                reader = csv.DictReader(f)
-                
-                # 檢查必要的列
-                if not reader.fieldnames or 'household_id' not in reader.fieldnames or 'name' not in reader.fieldnames:
-                    QMessageBox.critical(
-                        self, "錯誤",
-                        "CSV 文件必須包含 'household_id' 和 'name' 列"
-                    )
-                    return
-                
-                for row in reader:
-                    household_id = row['household_id'].strip()
-                    name = row['name'].strip()
-                    
-                    if household_id and name:
-                        households.append({
-                            'household_id': household_id,
-                            'name': name
-                        })
+            households = self._read_xlsx_file(file_path)
             
             if not households:
-                QMessageBox.warning(self, "警告", "CSV 文件中沒有有效的住戶數據")
+                QMessageBox.warning(self, "警告", ".xlsx 文件中沒有有效的住戶數據")
                 return
             
-            # 導入住戶
-            success, failed = self.db.import_households(households)
+            # 導入住戶和條碼映射
+            success = 0
+            failed = 0
+            
+            for household in households:
+                household_id = household['household_id'].strip()
+                barcode = household.get('barcode', '').strip()
+                
+                if not household_id:
+                    failed += 1
+                    continue
+                
+                # 先檢查是否已存在
+                if self.db.get_household(household_id):
+                    failed += 1
+                    continue
+                
+                # 添加住戶（使用戶號作為名稱）
+                if self.db.add_household(household_id, household_id):
+                    success += 1
+                    
+                    # 如果有原始條碼，添加映射
+                    if barcode:
+                        self.db.add_barcode_mapping(household_id, barcode)
+                else:
+                    failed += 1
             
             QMessageBox.information(
                 self, "導入完成",
                 f"成功導入 {success} 個住戶\n"
-                f"失敗 {failed} 個（可能是戶號重複）"
+                f"失敗 {failed} 個（可能是戶號重複或格式錯誤）\n\n"
+                f"條碼映射已自動建立"
             )
             
             self.load_households()
@@ -308,41 +237,147 @@ class HouseholdManagerDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"導入失敗: {str(e)}")
     
-    def export_households(self):
-        """導出住戶到 CSV 文件"""
+    def _read_xlsx_file(self, file_path: str) -> List[Dict]:
+        """
+        讀取 .xlsx 文件
+        
+        期望的列：戶號 | 原始條碼
+        """
+        households = []
+        
+        if XLSX_AVAILABLE:
+            # 使用 openpyxl
+            from openpyxl import load_workbook
+            
+            workbook = load_workbook(file_path)
+            worksheet = workbook.active
+            
+            # 讀取標題行
+            headers = []
+            for cell in worksheet[1]:
+                headers.append(cell.value)
+            
+            # 查找列索引
+            household_id_col = None
+            barcode_col = None
+            
+            for idx, header in enumerate(headers):
+                if header and '戶號' in str(header):
+                    household_id_col = idx
+                elif header and '條碼' in str(header):
+                    barcode_col = idx
+            
+            if household_id_col is None:
+                raise ValueError("找不到 '戶號' 列")
+            
+            # 讀取數據行
+            for row_idx, row in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
+                if not row[household_id_col]:
+                    continue
+                
+                household_id = str(row[household_id_col]).strip()
+                barcode = str(row[barcode_col]).strip() if barcode_col is not None and row[barcode_col] else ''
+                
+                if household_id:
+                    households.append({
+                        'household_id': household_id,
+                        'barcode': barcode
+                    })
+        
+        elif PANDAS_AVAILABLE:
+            # 使用 pandas
+            import pandas as pd
+            
+            df = pd.read_excel(file_path)
+            
+            # 查找列名
+            household_id_col = None
+            barcode_col = None
+            
+            for col in df.columns:
+                if '戶號' in str(col):
+                    household_id_col = col
+                elif '條碼' in str(col):
+                    barcode_col = col
+            
+            if household_id_col is None:
+                raise ValueError("找不到 '戶號' 列")
+            
+            # 讀取數據
+            for idx, row in df.iterrows():
+                household_id = str(row[household_id_col]).strip()
+                barcode = str(row[barcode_col]).strip() if barcode_col and pd.notna(row[barcode_col]) else ''
+                
+                if household_id and household_id != 'nan':
+                    households.append({
+                        'household_id': household_id,
+                        'barcode': barcode
+                    })
+        
+        return households
+    
+    def export_households_xlsx(self):
+        """導出住戶到 .xlsx 文件"""
+        if not XLSX_AVAILABLE and not PANDAS_AVAILABLE:
+            QMessageBox.critical(
+                self, "錯誤",
+                "需要安裝 openpyxl 或 pandas 來支持 .xlsx 文件\n\n"
+                "請運行: pip install openpyxl pandas"
+            )
+            return
+        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "保存住戶 CSV 文件",
-            "households.csv",
-            "CSV 文件 (*.csv)"
+            "保存住戶 .xlsx 文件",
+            "households.xlsx",
+            "Excel 文件 (*.xlsx)"
         )
         
         if not file_path:
             return
         
         try:
-            households = self.db.get_all_households()
+            households_data = []
             
-            if not households:
+            for household in self.all_households:
+                households_data.append({
+                    '戶號': household['household_id'],
+                    '原始條碼': household.get('barcode', '')
+                })
+            
+            if not households_data:
                 QMessageBox.warning(self, "警告", "沒有住戶數據可導出")
                 return
             
-            # 寫入 CSV 文件
-            with open(file_path, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=['household_id', 'name', 'status', 'created_at'])
-                writer.writeheader()
+            if PANDAS_AVAILABLE:
+                # 使用 pandas 導出
+                import pandas as pd
                 
-                for household in households:
-                    writer.writerow({
-                        'household_id': household['household_id'],
-                        'name': household['name'],
-                        'status': household.get('status', ''),
-                        'created_at': household.get('created_at', '')
-                    })
+                df = pd.DataFrame(households_data)
+                df.to_excel(file_path, index=False, sheet_name='住戶')
+            
+            elif XLSX_AVAILABLE:
+                # 使用 openpyxl 導出
+                from openpyxl import Workbook
+                
+                workbook = Workbook()
+                worksheet = workbook.active
+                worksheet.title = '住戶'
+                
+                # 寫入標題
+                worksheet['A1'] = '戶號'
+                worksheet['B1'] = '原始條碼'
+                
+                # 寫入數據
+                for row_idx, household in enumerate(households_data, start=2):
+                    worksheet[f'A{row_idx}'] = household['戶號']
+                    worksheet[f'B{row_idx}'] = household['原始條碼']
+                
+                workbook.save(file_path)
             
             QMessageBox.information(
                 self, "成功",
-                f"已導出 {len(households)} 個住戶到 {file_path}"
+                f"已導出 {len(households_data)} 個住戶到 {Path(file_path).name}"
             )
             
         except Exception as e:
