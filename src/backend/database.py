@@ -530,3 +530,126 @@ class Database:
         cursor.execute("DELETE FROM households")
         conn.commit()
         conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CheckInDatabase 類 - 專為即時報到系統設計
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CheckInDatabase:
+    """即時報到系統專用資料庫"""
+
+    def __init__(self, db_path: str = None):
+        """初始化報到資料庫"""
+        configured_path = db_path or 'data/check_in.db'
+        data_dir = Path('data').resolve()
+        candidate = Path(configured_path)
+
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+
+        # 安全驗證：確保路徑在 data/ 目錄下
+        if candidate != data_dir and data_dir not in candidate.parents:
+            candidate = data_dir / 'check_in.db'
+
+        self.db_path = str(candidate)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.init_db()
+
+    def get_connection(self):
+        """獲取數據庫連接"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def init_db(self):
+        """初始化報到記錄表"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 創建報到記錄表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS check_in_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                household_id TEXT NOT NULL UNIQUE,
+                name TEXT,
+                check_in_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'checked_in'
+            )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def check_in(self, household_id: str, name: str = None) -> tuple:
+        """
+        記錄報到
+        返回 (success: bool, message: str, status_code: int)
+        """
+        household_id = str(household_id).strip()
+        if not household_id:
+            return False, 'Missing required field: household_id', 400
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("""
+                INSERT INTO check_in_records (household_id, name, status)
+                VALUES (?, ?, 'checked_in')
+            """, (household_id, name))
+            conn.commit()
+            conn.close()
+            return True, f'Check-in successful for {household_id}', 200
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False, f'Duplicate check-in: {household_id}', 409
+        except Exception as e:
+            conn.close()
+            return False, 'Database error', 500
+
+    def get_records(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+        """獲取報到記錄"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, household_id, name, check_in_time, status
+            FROM check_in_records
+            ORDER BY check_in_time DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_statistics(self) -> Dict:
+        """獲取報到統計"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) as total FROM check_in_records")
+        total = cursor.fetchone()['total']
+
+        cursor.execute("""
+            SELECT status, COUNT(*) as count
+            FROM check_in_records
+            GROUP BY status
+        """)
+        status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
+
+        conn.close()
+
+        return {
+            'total_checked_in': total,
+            'by_status': status_counts,
+            'timestamp': datetime.now().isoformat()
+        }
+
+    def clear_all(self):
+        """清空所有記錄"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM check_in_records")
+        conn.commit()
+        conn.close()
