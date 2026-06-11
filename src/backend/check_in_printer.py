@@ -1,17 +1,18 @@
 """
-報到單 PDF 生成模塊 - 使用 QR Code
+報到單 PDF 生成模塊 - 使用 Code128 條碼
 
 報到單規格：
-- QR Code 內容：戶號（例如 06-02F）
+- Code128 內容：戶號（例如 06-02F）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + QR Code
+- 內容：戶號 + 姓名 + Code128 條碼
 """
 import io
 from pathlib import Path
 from typing import List, Tuple
 
-import qrcode
+import barcode
+from barcode.writer import ImageWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -31,7 +32,7 @@ ROWS_PER_PAGE = 8
 
 
 class CheckInPrinter:
-    """報到單 PDF 生成器 - 使用 QR Code"""
+    """報到單 PDF 生成器 - 使用 Code128 條碼"""
 
     def __init__(self, output_dir: str = "exports/check_in_ballots"):
         """初始化"""
@@ -39,37 +40,38 @@ class CheckInPrinter:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _generate_qrcode_image(content: str) -> io.BytesIO:
+    def _generate_code128_image(content: str) -> io.BytesIO:
         """
-        生成 QR Code 圖片，返回 BytesIO 流
+        生成 Code128 條碼圖片，返回 BytesIO 流
         
         Args:
-            content: QR Code 內容（戶號）
+            content: Code128 內容（戶號）
             
         Returns:
             BytesIO 流
         """
         buf = io.BytesIO()
         
-        # 生成 QR Code
-        qr = qrcode.QRCode(
-            version=1,  # 自動調整大小
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=1,
-        )
-        
-        qr.add_data(content)
-        qr.make(fit=True)
-        
-        # 創建圖片
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        # 保存到 BytesIO
-        img.save(buf, format='PNG')
-        buf.seek(0)
-        
-        return buf
+        try:
+            # 生成 Code128 條碼
+            code128_class = barcode.get_barcode_class('code128')
+            writer = ImageWriter()
+            bar = code128_class(content, writer=writer)
+            
+            options = {
+                'module_width': 0.5,      # 條碼寬度
+                'module_height': 12.0,    # 條碼高度
+                'font_size': 10,          # 文字大小
+                'text_distance': 3,       # 文字與條碼距離
+            }
+            
+            bar.write(buf, options=options)
+            buf.seek(0)
+            
+            return buf
+        except Exception as e:
+            print(f"Code128 條碼生成失敗 {content}: {e}")
+            raise
 
     def generate_pdf(
         self,
@@ -128,18 +130,18 @@ class CheckInPrinter:
         row_cells = []
 
         for idx, (household_id, name) in enumerate(households):
-            # 生成 QR Code 圖片
+            # 生成 Code128 條碼圖片
             try:
-                qrcode_buf = self._generate_qrcode_image(household_id)
-                qrcode_img = RLImage(qrcode_buf, width=20 * mm, height=20 * mm)
+                code128_buf = self._generate_code128_image(household_id)
+                code128_img = RLImage(code128_buf, width=cell_w * 0.8, height=18 * mm)
             except Exception as e:
-                print(f"QR Code 生成失敗 {household_id}: {e}")
-                qrcode_img = Paragraph(f"[QR: {household_id}]", center_style)
+                print(f"Code128 生成失敗 {household_id}: {e}")
+                code128_img = Paragraph(f"[條碼: {household_id}]", center_style)
 
             cell_content = [
                 Paragraph(f"<b>{household_id}</b>", center_style),
                 Paragraph(name, id_style),
-                qrcode_img,
+                code128_img,
             ]
 
             row_cells.append(cell_content)
