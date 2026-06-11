@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
@@ -20,6 +20,7 @@ class CheckInWindow(QWidget):
         """初始化報到窗口"""
         super().__init__(parent)
         self.db = Database()
+        self.last_checked_in_household_id = None  # 記錄最後一筆報到的戶號
         
         self.init_ui()
     
@@ -122,6 +123,29 @@ class CheckInWindow(QWidget):
         # 如果找不到標準格式，返回原始文本
         return barcode_text
     
+    def is_household_checked_in(self, household_id: str) -> bool:
+        """
+        檢查住戶是否已報到
+        
+        Args:
+            household_id: 戶號
+            
+        Returns:
+            True 如果已報到，False 如果尚未報到
+        """
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT checked_in_at FROM check_in_records 
+            WHERE household_id = ?
+        """, (household_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result is not None
+    
     def process_check_in(self):
         """處理報到"""
         scanned_code = self.barcode_input.text().strip()
@@ -141,19 +165,32 @@ class CheckInWindow(QWidget):
                 f"戶號 {household_id} 不存在\n\n掃描結果: {scanned_code}"
             )
             self.barcode_input.clear()
+            self.barcode_input.setFocus()
+            return
+        
+        # 檢查是否已報到
+        if self.is_household_checked_in(household_id):
+            # 重複報到 - 提醒但不執行
+            QMessageBox.warning(
+                self, "重複報到", 
+                f"住戶 {household['name']} (戶號: {household_id}) 已報到\n\n請掃描下一筆資料"
+            )
+            self.barcode_input.clear()
+            self.barcode_input.setFocus()
             return
         
         # 執行報到
         if self.db.check_in_household(household_id):
-            QMessageBox.information(
-                self, "成功", 
-                f"住戶 {household['name']} (戶號: {household_id}) 報到成功"
-            )
+            # 正常報到 - 不顯示對話框，立即返回掃描區
+            self.last_checked_in_household_id = household_id
             self.barcode_input.clear()
+            self.barcode_input.setFocus()
             self.refresh_check_in_list()
         else:
-            QMessageBox.critical(self, "錯誤", "報到失敗，此住戶已報到或發生錯誤")
+            # 報到失敗
+            QMessageBox.critical(self, "錯誤", "報到失敗，請聯繫管理員")
             self.barcode_input.clear()
+            self.barcode_input.setFocus()
     
     def refresh_check_in_list(self):
         """刷新報到列表"""
@@ -181,14 +218,17 @@ class CheckInWindow(QWidget):
         rows = cursor.fetchall()
         conn.close()
         
+        # 黃色背景色
+        yellow_brush = QColor(255, 255, 0)  # 黃色
+        
         for row in rows:
             row_position = self.check_in_table.rowCount()
             self.check_in_table.insertRow(row_position)
             
             # 戶號
-            self.check_in_table.setItem(row_position, 0, QTableWidgetItem(row[0]))
+            household_id_item = QTableWidgetItem(row[0])
             # 住戶姓名
-            self.check_in_table.setItem(row_position, 1, QTableWidgetItem(row[1]))
+            name_item = QTableWidgetItem(row[1])
             
             # 報到時間 - 只顯示時間部分 (HH:MM:SS)
             if row[2]:
@@ -200,11 +240,23 @@ class CheckInWindow(QWidget):
             else:
                 checked_in_at = ""
             
-            self.check_in_table.setItem(row_position, 2, QTableWidgetItem(checked_in_at))
+            time_item = QTableWidgetItem(checked_in_at)
             
             # 狀態 - 已報到 或 尚未報到
             status = "已報到" if row[2] else "尚未報到"
-            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(status))
+            status_item = QTableWidgetItem(status)
+            
+            # 如果是最後一筆報到資料，設置黃色背景
+            if row[0] == self.last_checked_in_household_id:
+                household_id_item.setBackground(yellow_brush)
+                name_item.setBackground(yellow_brush)
+                time_item.setBackground(yellow_brush)
+                status_item.setBackground(yellow_brush)
+            
+            self.check_in_table.setItem(row_position, 0, household_id_item)
+            self.check_in_table.setItem(row_position, 1, name_item)
+            self.check_in_table.setItem(row_position, 2, time_item)
+            self.check_in_table.setItem(row_position, 3, status_item)
     
     def export_check_in_data(self):
         """導出報到數據"""
@@ -222,5 +274,6 @@ class CheckInWindow(QWidget):
         
         if reply == QMessageBox.StandardButton.Yes:
             self.db.clear_all_data()
+            self.last_checked_in_household_id = None
             self.refresh_check_in_list()
             QMessageBox.information(self, "成功", "數據已清空")
