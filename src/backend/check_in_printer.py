@@ -7,7 +7,7 @@
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
 - 內容：戶號 + 姓名 + Code39 條碼
 
-報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 原始條碼
+報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
 import io
 from pathlib import Path
@@ -202,7 +202,7 @@ class CheckInPrinter:
         """
         導出報到條碼到 Excel 文件
         
-        格式：戶號 | 戶名 | 面積（坪） | 原始條碼
+        格式：戶號 | 戶名 | 面積（坪） | 條碼
         
         Args:
             households: [{'household_id': 'A106-02', 'name': '洪正平', 'share_amount': 129.03, 'barcode': 'A106-02'}, ...]
@@ -228,7 +228,7 @@ class CheckInPrinter:
             worksheet.column_dimensions['D'].width = 18
             
             # 寫入標題
-            headers = ['戶號', '戶名', '面積（坪）', '原始條碼']
+            headers = ['戶號', '戶名', '面積（坪）', '條碼']
             header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
             header_font = Font(bold=True, size=11, color="FFFFFF")
             
@@ -270,7 +270,7 @@ class CheckInPrinter:
                 cell_c.number_format = '0.00'
                 cell_c.border = thin_border
                 
-                # 原始條碼
+                # 條碼
                 barcode_str = household.get('barcode', '')
                 cell_d = worksheet.cell(row=row_idx, column=4, value=barcode_str)
                 cell_d.alignment = Alignment(horizontal='center', vertical='center')
@@ -290,7 +290,7 @@ class CheckInPrinter:
                 '戶號': [h['household_id'] for h in households],
                 '戶名': [h['name'] for h in households],
                 '面積（坪）': [h.get('share_amount', 0.0) for h in households],
-                '原始條碼': [h.get('barcode', '') for h in households]
+                '條碼': [h.get('barcode', '') for h in households]
             }
             df = pd.DataFrame(data)
             
@@ -310,7 +310,7 @@ class CheckInPrinter:
             csv_path = output_path.replace('.xlsx', '.csv')
             
             with open(csv_path, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.DictWriter(f, fieldnames=['戶號', '戶名', '面積（坪）', '原始條碼'])
+                writer = csv.DictWriter(f, fieldnames=['戶號', '戶名', '面積（坪）', '條碼'])
                 writer.writeheader()
                 
                 for household in households:
@@ -318,7 +318,7 @@ class CheckInPrinter:
                         '戶號': household['household_id'],
                         '戶名': household['name'],
                         '面積（坪）': household.get('share_amount', 0.0),
-                        '原始條碼': household.get('barcode', '')
+                        '條碼': household.get('barcode', '')
                     })
             
             output_path = csv_path
