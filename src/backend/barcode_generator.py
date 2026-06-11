@@ -8,6 +8,17 @@ from typing import List, Tuple
 import os
 
 
+class CustomImageWriter(ImageWriter):
+    """自訂 ImageWriter - 正確顯示條碼底部文字"""
+    
+    def _text(self, code):
+        """
+        覆寫文字方法，使用正確的條碼數據而不是處理過的格式
+        """
+        # 返回原始的條碼數據作為文字標籤
+        return code
+
+
 class BarcodeGenerator:
     """使用 python-barcode 生成 Code128 條碼"""
 
@@ -34,11 +45,21 @@ class BarcodeGenerator:
         filepath = os.path.join(self.output_dir, filename)
         
         try:
-            # 生成 Code128 條碼
-            # Code128 支持所有字符，包括 06-02F 格式
+            # 生成 Code128 條碼，使用自訂 writer 確保文字格式正確
             code128_class = barcode.get_barcode_class('code128')
-            bar = code128_class(barcode_data, writer=ImageWriter())
-            bar.save(filepath)
+            
+            # 使用自訂的 CustomImageWriter 以正確顯示條碼數據
+            bar = code128_class(barcode_data, writer=CustomImageWriter())
+            
+            # 設置條碼選項
+            options = {
+                'module_width': 0.5,      # 條碼寬度
+                'module_height': 15.0,    # 條碼高度
+                'font_size': 14,          # 文字大小
+                'text_distance': 5,       # 文字與條碼距離
+            }
+            
+            bar.save(filepath, options=options)
             
             return f"{filepath}.png"
         except Exception as e:
