@@ -88,7 +88,8 @@ class HouseholdManagerDialog(QDialog):
         delete_button.clicked.connect(self.delete_household)
         button_layout.addWidget(delete_button)
         
-        button_layout.addSeparator()
+        # 添加分隔空間
+        button_layout.addSpacing(20)
         
         # 導入按鈕
         import_button = QPushButton("導入住戶（CSV）")
