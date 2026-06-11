@@ -11,6 +11,7 @@ from PyQt6.QtGui import QFont, QColor
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
 from src.backend.utils import format_datetime
+from src.backend.input_sanitizer import clean_barcode_input, print_debug_info
 
 
 class BarcodeSettingDialog(QDialog):
@@ -64,8 +65,15 @@ class BarcodeSettingDialog(QDialog):
         self.setLayout(layout)
     
     def get_barcode(self) -> str:
-        """獲取條碼"""
-        return self.barcode_input.text().strip()
+        """獲取條碼 - 自動清理隱藏字符"""
+        raw_input = self.barcode_input.text()
+        cleaned = clean_barcode_input(raw_input)
+        
+        # 調試輸出
+        if raw_input != cleaned:
+            print_debug_info(raw_input, cleaned)
+        
+        return cleaned
 
 
 class CheckInWindow(QWidget):
@@ -197,7 +205,13 @@ class CheckInWindow(QWidget):
     
     def process_check_in(self):
         """處理報到"""
-        scanned_code = self.barcode_input.text().strip()
+        # 【關鍵】清理掃描輸入 - 移除所有隱藏字符
+        raw_input = self.barcode_input.text()
+        scanned_code = clean_barcode_input(raw_input)
+        
+        # 調試輸出
+        if raw_input != scanned_code:
+            print_debug_info(raw_input, scanned_code)
         
         if not scanned_code:
             QMessageBox.warning(self, "警告", "請輸入條碼或戶號")
