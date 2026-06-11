@@ -1,25 +1,27 @@
 """
-報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code128 條碼字型
+報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 python-barcode 直接生成 Code128 條碼圖像
 
 報到單規格：
-- Code128 字型顯示條碼（例如 A106-02）
+- Code128 條碼圖像：戶號（例如 A106-02）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + Code128 字型條碼
+- 內容：戶號 + 姓名 + Code128 條碼圖像
 
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
+import io
 from pathlib import Path
 from typing import List, Dict
 
+import barcode
+from barcode.writer import ImageWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Image as RLImage
 
 try:
     import openpyxl
@@ -44,37 +46,6 @@ COLS_PER_PAGE = 2
 ROWS_PER_PAGE = 8
 
 
-def register_code128_font():
-    """
-    註冊 Code128 字型
-    
-    支持多個可能的字型路徑位置
-    """
-    font_paths = [
-        # Windows 路徑
-        "C:\\Windows\\Fonts\\code128.ttf",
-        # Mac 路徑
-        "/Library/Fonts/code128.ttf",
-        # Linux 路徑
-        "/usr/share/fonts/truetype/code128.ttf",
-        # 相對路徑
-        "fonts/code128.ttf",
-        "code128.ttf",
-    ]
-    
-    for font_path in font_paths:
-        try:
-            if Path(font_path).exists():
-                pdfmetrics.registerFont(TTFont('Code128', font_path))
-                print(f"Code128 字型已成功註冊: {font_path}")
-                return True
-        except Exception as e:
-            continue
-    
-    print("警告：找不到 Code128 字型檔案，將使用系統預設字型")
-    return False
-
-
 class CheckInPrinter:
     """報到單 PDF 生成器 + 報到條碼 Excel 導出"""
 
@@ -82,8 +53,48 @@ class CheckInPrinter:
         """初始化"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        # 註冊 Code128 字型
-        register_code128_font()
+
+    @staticmethod
+    def _generate_code128_image(content: str) -> io.BytesIO:
+        """
+        生成 Code128 條碼圖片，返回 BytesIO 流
+        
+        使用 python-barcode 庫直接生成條碼圖像
+        
+        Args:
+            content: Code128 內容（例如 A106-02）
+            
+        Returns:
+            BytesIO 流（PNG 圖像）
+        """
+        buf = io.BytesIO()
+        
+        try:
+            # 使用 python-barcode 生成 Code128 條碼
+            code128_class = barcode.get_barcode_class('code128')
+            writer = ImageWriter()
+            
+            # 生成條碼
+            bar = code128_class(content, writer=writer, add_checksum=False)
+            
+            # 條碼配置選項
+            options = {
+                'module_width': 0.5,      # 條碼條的寬度
+                'module_height': 15.0,    # 條碼的高度
+                'font_size': 0,           # 不顯示下方文字
+                'text_distance': 0,       # 文字距離
+                'quiet_zone': 2.5,        # 靜區寬度
+            }
+            
+            # 生成圖像到 BytesIO
+            bar.write(buf, options=options)
+            buf.seek(0)
+            
+            return buf
+            
+        except Exception as e:
+            print(f"Code128 條碼生成失敗 {content}: {e}")
+            raise
 
     def generate_pdf(
         self,
@@ -94,7 +105,7 @@ class CheckInPrinter:
         生成報到單 PDF
         
         報到單格式：
-        戶號 + 姓名 + Code128 字型條碼
+        戶號 + 姓名 + Code128 條碼圖像
         
         Args:
             households: [{'household_id': 'A106-02', 'name': '洪正平'}, ...]
@@ -119,7 +130,7 @@ class CheckInPrinter:
 
         styles = getSampleStyleSheet()
         
-        # 戶號樣式（普通粗體）
+        # 戶號樣式
         household_id_style = ParagraphStyle(
             'HouseholdID',
             parent=styles['Normal'],
@@ -129,7 +140,7 @@ class CheckInPrinter:
             fontName='Helvetica-Bold',
         )
         
-        # 姓名樣式（普通）
+        # 姓名樣式
         name_style = ParagraphStyle(
             'Name',
             parent=styles['Normal'],
@@ -138,17 +149,6 @@ class CheckInPrinter:
             leading=10,
             textColor=colors.HexColor('#333333'),
             fontName='Helvetica',
-        )
-        
-        # Code128 字型樣式（不使用任何樣式修飾，只用純 Code128 字型）
-        code128_style = ParagraphStyle(
-            'Code128Barcode',
-            parent=styles['Normal'],
-            alignment=TA_CENTER,
-            fontSize=18,
-            leading=20,
-            fontName='Code128',  # 純 Code128 字型
-            textColor=colors.HexColor('#000000'),
         )
 
         # 每個標籤的寬度
@@ -165,12 +165,21 @@ class CheckInPrinter:
             household_id = household['household_id']
             name = household['name']
             
-            # 單元格內容：戶號、姓名、Code128 條碼
-            # 注意：不要在 Code128 字型的 Paragraph 中使用 HTML 標籤
+            # 生成 Code128 條碼圖像
+            try:
+                code128_buf = self._generate_code128_image(household_id)
+                # 嵌入條碼圖像到 PDF
+                code128_img = RLImage(code128_buf, width=cell_w * 0.9, height=18 * mm)
+            except Exception as e:
+                print(f"條碼生成失敗 {household_id}: {e}")
+                # 如果生成失敗，顯示文字代替
+                code128_img = Paragraph(f"條碼: {household_id}", name_style)
+            
+            # 單元格內容：戶號、姓名、條碼圖像
             cell_content = [
-                Paragraph(household_id, household_id_style),        # 戶號
-                Paragraph(name, name_style),                         # 姓名
-                Paragraph(household_id, code128_style),              # Code128 條碼（純文字）
+                Paragraph(household_id, household_id_style),
+                Paragraph(name, name_style),
+                code128_img,
             ]
 
             row_cells.append(cell_content)
