@@ -50,6 +50,17 @@ class Database:
             )
         """)
 
+        # 條碼映射表（戶號 <-> 掃描結果）
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS barcode_mapping (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                household_id TEXT NOT NULL UNIQUE,
+                barcode_data TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (household_id) REFERENCES households(household_id)
+            )
+        """)
+
         # 投票項目表（以案號為唯一標識）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voting_items (
@@ -181,6 +192,74 @@ class Database:
             else:
                 failed += 1
         return success, failed
+
+    # ─────────────────────────── 條碼映射管理 ───────────────────────────
+
+    def add_barcode_mapping(self, household_id: str, barcode_data: str) -> bool:
+        """添加戶號-條碼映射"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # 先刪除該戶號的舊映射（如果存在）
+            cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
+            
+            # 插入新映射
+            cursor.execute("""
+                INSERT INTO barcode_mapping (household_id, barcode_data)
+                VALUES (?, ?)
+            """, (household_id, barcode_data))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+
+    def get_household_id_by_barcode(self, barcode_data: str) -> Optional[str]:
+        """通過條碼查詢戶號"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT household_id FROM barcode_mapping WHERE barcode_data = ?
+        """, (barcode_data,))
+        row = cursor.fetchone()
+        conn.close()
+        return row['household_id'] if row else None
+
+    def get_barcode_by_household_id(self, household_id: str) -> Optional[str]:
+        """通過戶號查詢條碼"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT barcode_data FROM barcode_mapping WHERE household_id = ?
+        """, (household_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row['barcode_data'] if row else None
+
+    def get_all_barcode_mappings(self) -> List[Dict]:
+        """獲取所有條碼映射"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT household_id, barcode_data FROM barcode_mapping ORDER BY household_id
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def delete_barcode_mapping(self, household_id: str) -> bool:
+        """刪除條碼映射"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception:
+            conn.close()
+            return False
 
     # ─────────────────────────── 報到管理 ───────────────────────────
 
@@ -377,6 +456,9 @@ class Database:
             cursor.execute("SELECT * FROM check_in_records")
             check_in_records = [dict(row) for row in cursor.fetchall()]
 
+            cursor.execute("SELECT * FROM barcode_mapping")
+            barcode_mappings = [dict(row) for row in cursor.fetchall()]
+
             cursor.execute("SELECT * FROM voting_items")
             voting_items = [dict(row) for row in cursor.fetchall()]
 
@@ -389,6 +471,7 @@ class Database:
                 'config': config,
                 'households': households,
                 'check_in_records': check_in_records,
+                'barcode_mappings': barcode_mappings,
                 'voting_items': voting_items,
                 'votes': votes,
                 'exported_at': datetime.now().isoformat()
@@ -410,6 +493,7 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM votes")
         cursor.execute("DELETE FROM check_in_records")
+        cursor.execute("DELETE FROM barcode_mapping")
         cursor.execute("DELETE FROM households")
         cursor.execute("DELETE FROM voting_items")
         cursor.execute("DELETE FROM config")
@@ -422,6 +506,7 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM votes")
         cursor.execute("DELETE FROM check_in_records")
+        cursor.execute("DELETE FROM barcode_mapping")
         cursor.execute("DELETE FROM households")
         conn.commit()
         conn.close()
