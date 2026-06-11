@@ -1,11 +1,11 @@
 """
-報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code39 條碼
+報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code128 條碼
 
 報到單規格：
-- Code39 內容：原始條碼（例如 A106-02）
+- Code128 內容：原始條碼（例如 A106-02）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + Code39 條碼
+- 內容：戶號 + 姓名 + Code128 條碼
 
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
@@ -55,12 +55,12 @@ class CheckInPrinter:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _generate_code39_image(content: str) -> io.BytesIO:
+    def _generate_code128_image(content: str) -> io.BytesIO:
         """
-        生成 Code39 條碼圖片，返回 BytesIO 流
+        生成 Code128 條碼圖片，返回 BytesIO 流
         
         Args:
-            content: Code39 內容（原始條碼）
+            content: Code128 內容（原始條碼）
             
         Returns:
             BytesIO 流
@@ -68,10 +68,10 @@ class CheckInPrinter:
         buf = io.BytesIO()
         
         try:
-            # 生成 Code39 條碼
-            code39_class = barcode.get_barcode_class('code39')
+            # 生成 Code128 條碼
+            code128_class = barcode.get_barcode_class('code128')
             writer = ImageWriter()
-            bar = code39_class(content, writer=writer, add_checksum=False)
+            bar = code128_class(content, writer=writer, add_checksum=False)
             
             options = {
                 'module_width': 0.5,      # 條碼寬度
@@ -85,7 +85,7 @@ class CheckInPrinter:
             
             return buf
         except Exception as e:
-            print(f"Code39 條碼生成失敗 {content}: {e}")
+            print(f"Code128 條碼生成失敗 {content}: {e}")
             raise
 
     def generate_pdf(
@@ -149,18 +149,18 @@ class CheckInPrinter:
             name = household['name']
             barcode_str = household.get('barcode', household_id)  # 優先用原始條碼，沒有則用戶號
             
-            # 生成 Code39 條碼圖片（使用原始條碼）
+            # 生成 Code128 條碼圖片（使用原始條碼）
             try:
-                code39_buf = self._generate_code39_image(barcode_str)
-                code39_img = RLImage(code39_buf, width=cell_w * 0.8, height=18 * mm)
+                code128_buf = self._generate_code128_image(barcode_str)
+                code128_img = RLImage(code128_buf, width=cell_w * 0.8, height=18 * mm)
             except Exception as e:
-                print(f"Code39 生成失敗 {barcode_str}: {e}")
-                code39_img = Paragraph(f"[條碼: {barcode_str}]", center_style)
+                print(f"Code128 生成失敗 {barcode_str}: {e}")
+                code128_img = Paragraph(f"[條碼: {barcode_str}]", center_style)
 
             cell_content = [
                 Paragraph(f"<b>{household_id}</b>", center_style),
                 Paragraph(name, id_style),
-                code39_img,
+                code128_img,
             ]
 
             row_cells.append(cell_content)
