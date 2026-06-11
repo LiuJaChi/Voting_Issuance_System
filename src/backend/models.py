@@ -16,6 +16,6 @@ class CheckInRequest:
         status = str(data.get('status', 'checked_in')).strip() or 'checked_in'
 
         if not household_id:
-            raise ValueError('household_id is required')
+            raise ValueError('Missing required field: household_id')
 
         return cls(household_id=household_id, name=name, status=status)

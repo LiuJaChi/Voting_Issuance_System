@@ -1,7 +1,9 @@
 """即時報到 API（Flask）"""
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.exceptions import BadRequest
 
 from src.backend.database import CheckInDatabase
 from src.backend.models import CheckInRequest
@@ -16,12 +18,22 @@ db = CheckInDatabase()
 
 @app.post('/api/check-in')
 def check_in():
-    payload = request.get_json(silent=True) or {}
+    try:
+        payload = request.get_json() or {}
+    except BadRequest:
+        return jsonify({'success': False, 'message': 'Malformed JSON body'}), 400
+
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'message': 'Invalid check-in payload'}), 400
+
+    household_id = str(payload.get('household_id', '')).strip()
+    if not household_id:
+        return jsonify({'success': False, 'message': 'Missing required field: household_id'}), 400
 
     try:
         data = CheckInRequest.from_dict(payload)
-    except ValueError as exc:
-        return jsonify({'success': False, 'message': str(exc)}), 400
+    except ValueError:
+        return jsonify({'success': False, 'message': 'Invalid check-in payload'}), 400
 
     result = db.add_check_in_record(
         household_id=data.household_id,
@@ -59,4 +71,7 @@ def admin_page():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    debug_mode = os.getenv('FLASK_ENV', '').lower() == 'development'
+    host = os.getenv('FLASK_HOST', '127.0.0.1')
+    port = int(os.getenv('FLASK_PORT', '5000'))
+    app.run(host=host, port=port, debug=debug_mode)

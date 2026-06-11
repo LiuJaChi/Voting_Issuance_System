@@ -1,6 +1,7 @@
 """
 數據庫管理模塊 - 支持住戶面積（持分）
 """
+import os
 import sqlite3
 import json
 from datetime import datetime
@@ -535,9 +536,19 @@ class Database:
 class CheckInDatabase:
     """即時報到 API 專用數據庫"""
 
-    def __init__(self, db_path: str = "data/check_in.db"):
-        self.db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    def __init__(self, db_path: str = None):
+        initial_db_path = db_path or os.getenv('CHECK_IN_DB_PATH', 'data/check_in.db')
+        data_dir = Path('data').resolve()
+        candidate = Path(initial_db_path)
+
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+
+        if candidate != data_dir and data_dir not in candidate.parents:
+            candidate = data_dir / 'check_in.db'
+
+        self.db_path = str(candidate)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def get_connection(self):
@@ -562,6 +573,15 @@ class CheckInDatabase:
         conn.close()
 
     def add_check_in_record(self, household_id: str, name: str = '', status: str = 'checked_in') -> Dict:
+        """新增報到記錄。
+
+        Returns:
+            {
+                'success': bool,
+                'message': 'checked_in' 或 'duplicate_check_in',
+                'record': dict
+            }
+        """
         conn = self.get_connection()
         cursor = conn.cursor()
 

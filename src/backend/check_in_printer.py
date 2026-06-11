@@ -46,6 +46,8 @@ LABEL_HEIGHT = 35 * mm
 # 每頁欄數與列數
 COLS_PER_PAGE = 2
 ROWS_PER_PAGE = 8
+QR_BOX_SIZE = 8
+QR_BORDER = 2
 
 
 class CheckInPrinter:
@@ -68,9 +70,17 @@ class CheckInPrinter:
         self.temp_barcodes = []
 
     def _build_qr_payload(self, household: Dict) -> str:
-        """構建 QR Code JSON 內容"""
+        """構建 QR Code JSON 內容。
+
+        欄位包含 household_id、name、share_amount，
+        供手機掃描端與後續統計擴充使用。
+        """
+        household_id = household.get('household_id', '').strip()
+        if not household_id:
+            raise ValueError('household_id is required for QR payload')
+
         payload = {
-            'household_id': household['household_id'],
+            'household_id': household_id,
             'name': household.get('name', ''),
             'share_amount': household.get('share_amount', 0.0),
         }
@@ -86,8 +96,8 @@ class CheckInPrinter:
         qr = qrcode.QRCode(
             version=None,
             error_correction=qrcode.constants.ERROR_CORRECT_M,
-            box_size=8,
-            border=2,
+            box_size=QR_BOX_SIZE,
+            border=QR_BORDER,
         )
         qr.add_data(self._build_qr_payload(household))
         qr.make(fit=True)

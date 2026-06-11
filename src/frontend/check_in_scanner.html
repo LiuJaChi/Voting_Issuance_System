@@ -31,11 +31,12 @@
     const scanResult = document.getElementById('scanResult');
     const apiResult = document.getElementById('apiResult');
 
+    const SCAN_COOLDOWN_MS = 2000;
     let lockUntil = 0;
 
-    function setText(el, text, cls='') {
+    function setText(el, text, cssClass='') {
       el.textContent = text;
-      el.className = cls;
+      el.className = cssClass;
     }
 
     function parsePayload(raw) {
@@ -90,7 +91,7 @@
         if (code && now >= lockUntil) {
           const value = (code.data || '').trim();
           if (value) {
-            lockUntil = now + 1800;
+            lockUntil = now + SCAN_COOLDOWN_MS;
             setText(scanResult, value, 'ok');
             sendCheckIn(value);
           }
