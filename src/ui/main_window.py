@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
         # 打印菜單
         print_menu = menubar.addMenu("打印")
 
-        check_in_print_action = print_menu.addAction("打印報到單 PDF")
+        check_in_print_action = print_menu.addAction("打印報到單 PDF + 導出報到.xlsx")
         check_in_print_action.triggered.connect(self.print_check_in_ballots)
 
         ballot_print_action = print_menu.addAction("打印投票單 PDF")
@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
         self.voting_window.load_voting_items()
 
     def print_check_in_ballots(self):
-        """打印報到單 PDF"""
+        """打印報到單 PDF + 導出報到.xlsx"""
         try:
             # 從數據庫獲取所有住戶
             households = self.db.get_all_households()
@@ -144,27 +144,46 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成報到單")
                 return
 
-            # 將住戶數據轉換為 (household_id, name) 元組列表
-            household_tuples = [(h['household_id'], h['name']) for h in households]
+            # 構建住戶數據字典列表，包含條碼信息
+            households_with_barcode = []
+            for h in households:
+                household_id = h['household_id']
+                barcode = self.db.get_barcode_by_household_id(household_id) or household_id
+                
+                households_with_barcode.append({
+                    'household_id': household_id,
+                    'name': h['name'],
+                    'share_amount': h.get('share_amount', 0.0),
+                    'barcode': barcode
+                })
 
             # 選擇輸出位置
-            filename, _ = QFileDialog.getSaveFileName(
+            output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "保存報到單 PDF",
-                "check_in_ballots.pdf",
-                "PDF 文件 (*.pdf)"
+                "選擇報到單輸出目錄",
+                "exports/check_in_ballots"
             )
 
-            if not filename:
+            if not output_dir:
                 return
 
-            # 生成 PDF
-            printer = CheckInPrinter(output_dir="exports/check_in_ballots")
-            output_path = printer.generate_pdf(household_tuples, filename=filename.split('/')[-1])
+            # 初始化打印機
+            printer = CheckInPrinter(output_dir=output_dir)
+
+            # 生成 PDF 報到單
+            pdf_filename = "check_in_ballots.pdf"
+            pdf_path = printer.generate_pdf(households_with_barcode, filename=pdf_filename)
+
+            # 導出 Excel 報到條碼文件
+            xlsx_filename = "報到.xlsx"
+            xlsx_path = printer.export_check_in_xlsx(households_with_barcode, filename=xlsx_filename)
 
             QMessageBox.information(
                 self, "成功",
-                f"報到單 PDF 已生成\n位置: {output_path}"
+                f"報到單已生成完成！\n\n"
+                f"📄 PDF 報到單: {pdf_filename}\n"
+                f"📊 報到條碼: {xlsx_filename}\n\n"
+                f"位置: {output_dir}"
             )
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {str(e)}")
