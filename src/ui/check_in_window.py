@@ -96,6 +96,32 @@ class CheckInWindow(QWidget):
         # 初始化數據
         self.refresh_check_in_list()
     
+    def extract_household_id(self, barcode_text: str) -> str:
+        """
+        從掃描的條碼中提取戶號
+        
+        條碼可能包含額外的字符，需要提取有效的戶號格式
+        戶號格式：數字-數字字母 (例如：06-02F, 06-03A)
+        
+        Args:
+            barcode_text: 掃描的原始條碼文本
+            
+        Returns:
+            提取的戶號，或原始文本（如果無法提取）
+        """
+        import re
+        
+        # 戶號格式：2位數字-2位數字+1個字母或2位數字
+        # 例如：06-02F, 06-03A
+        pattern = r'(\d{1,2}-\d{1,2}[A-Z]?)'
+        
+        match = re.search(pattern, barcode_text)
+        if match:
+            return match.group(1)
+        
+        # 如果找不到標準格式，返回原始文本
+        return barcode_text
+    
     def process_check_in(self):
         """處理報到"""
         scanned_code = self.barcode_input.text().strip()
@@ -104,21 +130,24 @@ class CheckInWindow(QWidget):
             QMessageBox.warning(self, "警告", "請輸入條碼或戶號")
             return
         
+        # 從條碼中提取戶號
+        household_id = self.extract_household_id(scanned_code)
+        
         # 查找住戶（使用戶號）
-        household = self.db.get_household(scanned_code)
+        household = self.db.get_household(household_id)
         if not household:
             QMessageBox.critical(
                 self, "錯誤", 
-                f"戶號 {scanned_code} 不存在"
+                f"戶號 {household_id} 不存在\n\n掃描結果: {scanned_code}"
             )
             self.barcode_input.clear()
             return
         
         # 執行報到
-        if self.db.check_in_household(scanned_code):
+        if self.db.check_in_household(household_id):
             QMessageBox.information(
                 self, "成功", 
-                f"住戶 {household['name']} (戶號: {scanned_code}) 報到成功"
+                f"住戶 {household['name']} (戶號: {household_id}) 報到成功"
             )
             self.barcode_input.clear()
             self.refresh_check_in_list()
