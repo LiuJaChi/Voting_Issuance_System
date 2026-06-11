@@ -1,15 +1,14 @@
 """
-報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code128 條碼
+報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 Code128 條碼字型
 
 報到單規格：
-- Code128 內容：戶號（例如 A106-02）
+- Code128 字型顯示條碼（例如 A106-02）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + Code128 字型顯示條碼
+- 內容：戶號 + 姓名 + Code128 字型條碼
 
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
-import io
 from pathlib import Path
 from typing import List, Dict
 
@@ -19,6 +18,8 @@ from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 try:
     import openpyxl
@@ -43,6 +44,37 @@ COLS_PER_PAGE = 2
 ROWS_PER_PAGE = 8
 
 
+def register_code128_font():
+    """
+    註冊 Code128 字型
+    
+    支持多個可能的字型路徑位置
+    """
+    font_paths = [
+        # Windows 路徑
+        "C:\\Windows\\Fonts\\code128.ttf",
+        # Mac 路徑
+        "/Library/Fonts/code128.ttf",
+        # Linux 路徑
+        "/usr/share/fonts/truetype/code128.ttf",
+        # 相對路徑
+        "fonts/code128.ttf",
+        "code128.ttf",
+    ]
+    
+    for font_path in font_paths:
+        try:
+            if Path(font_path).exists():
+                pdfmetrics.registerFont(TTFont('Code128', font_path))
+                print(f"Code128 字型已成功註冊: {font_path}")
+                return True
+        except Exception as e:
+            continue
+    
+    print("警告：找不到 Code128 字型檔案，將使用系統預設字型")
+    return False
+
+
 class CheckInPrinter:
     """報到單 PDF 生成器 + 報到條碼 Excel 導出"""
 
@@ -50,6 +82,8 @@ class CheckInPrinter:
         """初始化"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
+        # 註冊 Code128 字型
+        register_code128_font()
 
     def generate_pdf(
         self,
@@ -60,7 +94,7 @@ class CheckInPrinter:
         生成報到單 PDF
         
         報到單格式：
-        戶號 + 姓名 + Code128 字型顯示條碼
+        戶號 + 姓名 + Code128 字型條碼
         
         Args:
             households: [{'household_id': 'A106-02', 'name': '洪正平'}, ...]
@@ -85,7 +119,7 @@ class CheckInPrinter:
 
         styles = getSampleStyleSheet()
         
-        # 戶號樣式
+        # 戶號樣式（普通粗體）
         household_id_style = ParagraphStyle(
             'HouseholdID',
             parent=styles['Normal'],
@@ -95,7 +129,7 @@ class CheckInPrinter:
             fontName='Helvetica-Bold',
         )
         
-        # 姓名樣式
+        # 姓名樣式（普通）
         name_style = ParagraphStyle(
             'Name',
             parent=styles['Normal'],
@@ -103,16 +137,17 @@ class CheckInPrinter:
             fontSize=8,
             leading=10,
             textColor=colors.HexColor('#333333'),
+            fontName='Helvetica',
         )
         
-        # Code128 字型樣式（使用 Code128 字體顯示條碼）
+        # Code128 字型樣式（不使用任何樣式修飾，只用純 Code128 字型）
         code128_style = ParagraphStyle(
-            'Code128',
+            'Code128Barcode',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=16,
-            leading=18,
-            fontName='Code128',  # 使用 Code128 字型
+            fontSize=18,
+            leading=20,
+            fontName='Code128',  # 純 Code128 字型
             textColor=colors.HexColor('#000000'),
         )
 
@@ -130,12 +165,12 @@ class CheckInPrinter:
             household_id = household['household_id']
             name = household['name']
             
-            # 使用 Code128 字型顯示條碼
-            # Code128 字型會自動將文字轉換為條碼格式
+            # 單元格內容：戶號、姓名、Code128 條碼
+            # 注意：不要在 Code128 字型的 Paragraph 中使用 HTML 標籤
             cell_content = [
-                Paragraph(f"<b>{household_id}</b>", household_id_style),
-                Paragraph(name, name_style),
-                Paragraph(household_id, code128_style),  # 用 Code128 字型顯示
+                Paragraph(household_id, household_id_style),        # 戶號
+                Paragraph(name, name_style),                         # 姓名
+                Paragraph(household_id, code128_style),              # Code128 條碼（純文字）
             ]
 
             row_cells.append(cell_content)
@@ -185,7 +220,7 @@ class CheckInPrinter:
                     'household_id': 'A106-02', 
                     'name': '洪正平', 
                     'share_amount': 129.03, 
-                    'barcode_data': 'A106-02'  # Excel 條碼欄位使用這個
+                    'barcode_data': 'A106-02'
                 }, 
                 ...
             ]
@@ -253,7 +288,7 @@ class CheckInPrinter:
                 cell_c.number_format = '0.00'
                 cell_c.border = thin_border
                 
-                # 條碼 - 使用 barcode_data 欄位
+                # 條碼
                 barcode_str = household.get('barcode_data', '')
                 cell_d = worksheet.cell(row=row_idx, column=4, value=barcode_str)
                 cell_d.alignment = Alignment(horizontal='center', vertical='center')
