@@ -148,13 +148,17 @@ class MainWindow(QMainWindow):
             households_with_barcode = []
             for h in households:
                 household_id = h['household_id']
-                barcode = self.db.get_barcode_by_household_id(household_id) or household_id
+                # 優先使用原始條碼，如果沒有則使用戶號作為條碼內容（PDF 用）
+                barcode_for_pdf = self.db.get_barcode_by_household_id(household_id) or household_id
+                # Excel 中條碼欄位保存原始條碼（可能為空）
+                barcode_data = self.db.get_barcode_by_household_id(household_id) or ''
                 
                 households_with_barcode.append({
                     'household_id': household_id,
                     'name': h['name'],
                     'share_amount': h.get('share_amount', 0.0),
-                    'barcode': barcode
+                    'barcode': barcode_for_pdf,  # 用於生成 PDF 條碼
+                    'barcode_data': barcode_data  # 用於 Excel 導出
                 })
 
             # 選擇輸出位置
