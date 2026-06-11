@@ -2,10 +2,10 @@
 報到單 PDF 生成模塊 + 報到條碼 Excel 導出 - 使用 python-barcode 直接生成 Code128 條碼圖像
 
 報到單規格：
-- Code128 條碼圖像：戶號（例如 A106-02）
+- 每張標籤：戶號 + Code128 條碼圖像
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + Code128 條碼圖像
+- 內容：戶號（上方） + 條碼圖像（下方）
 
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
@@ -22,6 +22,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import Image as RLImage
+from reportlab.platypus import Spacer
 
 try:
     import openpyxl
@@ -80,10 +81,10 @@ class CheckInPrinter:
             # 條碼配置選項
             options = {
                 'module_width': 0.5,      # 條碼條的寬度
-                'module_height': 15.0,    # 條碼的高度
+                'module_height': 10.0,    # 條碼的高度
                 'font_size': 0,           # 不顯示下方文字
                 'text_distance': 0,       # 文字距離
-                'quiet_zone': 2.5,        # 靜區寬度
+                'quiet_zone': 2.0,        # 靜區寬度
             }
             
             # 生成圖像到 BytesIO
@@ -105,7 +106,7 @@ class CheckInPrinter:
         生成報到單 PDF
         
         報到單格式：
-        戶號 + 姓名 + Code128 條碼圖像
+        戶號（上方） + 條碼圖像（下方）
         
         Args:
             households: [{'household_id': 'A106-02', 'name': '洪正平'}, ...]
@@ -130,25 +131,14 @@ class CheckInPrinter:
 
         styles = getSampleStyleSheet()
         
-        # 戶號樣式
+        # 戶號樣式（加粗、居中）
         household_id_style = ParagraphStyle(
             'HouseholdID',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=10,
-            leading=12,
+            fontSize=12,
+            leading=14,
             fontName='Helvetica-Bold',
-        )
-        
-        # 姓名樣式
-        name_style = ParagraphStyle(
-            'Name',
-            parent=styles['Normal'],
-            alignment=TA_CENTER,
-            fontSize=8,
-            leading=10,
-            textColor=colors.HexColor('#333333'),
-            fontName='Helvetica',
         )
 
         # 每個標籤的寬度
@@ -163,26 +153,34 @@ class CheckInPrinter:
 
         for household in households:
             household_id = household['household_id']
-            name = household['name']
             
             # 生成 Code128 條碼圖像
             try:
                 code128_buf = self._generate_code128_image(household_id)
                 # 嵌入條碼圖像到 PDF
-                code128_img = RLImage(code128_buf, width=cell_w * 0.9, height=18 * mm)
+                code128_img = RLImage(code128_buf, width=cell_w * 0.85, height=12 * mm)
             except Exception as e:
                 print(f"條碼生成失敗 {household_id}: {e}")
                 # 如果生成失敗，顯示文字代替
-                code128_img = Paragraph(f"條碼: {household_id}", name_style)
+                code128_img = Paragraph(f"Barcode: {household_id}", household_id_style)
             
-            # 單元格內容：戶號、姓名、條碼圖像
-            cell_content = [
-                Paragraph(household_id, household_id_style),
-                Paragraph(name, name_style),
-                code128_img,
-            ]
+            # 單元格內容：戶號（上方）+ 條碼圖像（下方）
+            # 使用垂直排列
+            cell_content_table = Table(
+                [
+                    [Paragraph(household_id, household_id_style)],
+                    [Spacer(1, 2 * mm)],  # 間距
+                    [code128_img],
+                ],
+                colWidths=[cell_w * 0.95],
+                rowHeights=[8 * mm, 2 * mm, 12 * mm],
+            )
+            cell_content_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
 
-            row_cells.append(cell_content)
+            row_cells.append(cell_content_table)
 
             if len(row_cells) == COLS_PER_PAGE:
                 table_data.append(row_cells)
@@ -202,12 +200,14 @@ class CheckInPrinter:
 
         table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
         table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BOX', (0, 0), (-1, -1), 1, colors.black),
             ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 2),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
 
         doc.build([table])
