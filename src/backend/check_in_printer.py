@@ -59,8 +59,10 @@ class CheckInPrinter:
         """
         生成 Code128 條碼圖片，返回 BytesIO 流
         
+        Code128 只支持 ASCII 字符，不能包含中文
+        
         Args:
-            content: Code128 內容（原始條碼）
+            content: Code128 內容（原始條碼，例如 A106-02）
             
         Returns:
             BytesIO 流
@@ -68,16 +70,17 @@ class CheckInPrinter:
         buf = io.BytesIO()
         
         try:
-            # 生成 Code128 條碼
+            # 生成 Code128 條碼 - 不顯示下方文字，避免中文問題
             code128_class = barcode.get_barcode_class('code128')
             writer = ImageWriter()
+            # 使用 write_text=False 來禁用條碼下方的文字顯示
             bar = code128_class(content, writer=writer, add_checksum=False)
             
             options = {
                 'module_width': 0.5,      # 條碼寬度
-                'module_height': 12.0,    # 條碼高度
-                'font_size': 10,          # 文字大小
-                'text_distance': 3,       # 文字與條碼距離
+                'module_height': 15.0,    # 條碼高度
+                'font_size': 0,           # 不顯示文字
+                'text_distance': 0,       # 文字距離
             }
             
             bar.write(buf, options=options)
@@ -129,9 +132,17 @@ class CheckInPrinter:
             'ID',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=8,
-            leading=10,
+            fontSize=7,
+            leading=9,
             textColor=colors.HexColor('#333333'),
+        )
+        barcode_style = ParagraphStyle(
+            'Barcode',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
+            fontSize=6,
+            leading=8,
+            textColor=colors.HexColor('#666666'),
         )
 
         # 每個標籤的寬度
@@ -152,15 +163,17 @@ class CheckInPrinter:
             # 生成 Code128 條碼圖片（使用原始條碼）
             try:
                 code128_buf = self._generate_code128_image(barcode_str)
-                code128_img = RLImage(code128_buf, width=cell_w * 0.8, height=18 * mm)
+                code128_img = RLImage(code128_buf, width=cell_w * 0.85, height=15 * mm)
             except Exception as e:
                 print(f"Code128 生成失敗 {barcode_str}: {e}")
-                code128_img = Paragraph(f"[條碼: {barcode_str}]", center_style)
+                code128_img = Paragraph(f"條碼: {barcode_str}", barcode_style)
 
+            # 只用純英文/數字，避免中文編碼問題
             cell_content = [
                 Paragraph(f"<b>{household_id}</b>", center_style),
                 Paragraph(name, id_style),
                 code128_img,
+                Paragraph(barcode_str, barcode_style),  # 條碼文本（純英文/數字）
             ]
 
             row_cells.append(cell_content)
