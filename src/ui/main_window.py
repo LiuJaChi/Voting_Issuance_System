@@ -200,14 +200,18 @@ class MainWindow(QMainWindow):
             if not output_dir:
                 return
 
-            # 生成條碼
+            # 生成條碼 - 使用正確的方法
             generator = BarcodeGenerator(output_dir=output_dir)
-            household_ids = [h['household_id'] for h in households]
-            generator.generate_barcodes(household_ids)
+            
+            # 轉換為 (household_id, name) 元組列表
+            household_tuples = [(h['household_id'], h['name']) for h in households]
+            
+            # 生成住戶報到條碼
+            generator.generate_household_barcodes_batch(household_tuples, show_text=True)
 
             QMessageBox.information(
                 self, "成功",
-                f"條碼圖片已生成\n位置: {output_dir}"
+                f"條碼圖片已生成\n位置: {output_dir}\n共 {len(households)} 個條碼"
             )
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成條碼失敗: {str(e)}")
