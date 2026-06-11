@@ -1,5 +1,5 @@
 """
-報到窗口
+報到窗口 - 支持條碼映射比對
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -115,9 +115,9 @@ class CheckInWindow(QWidget):
         
         # 條碼掃描輸入
         scan_layout = QHBoxLayout()
-        scan_layout.addWidget(QLabel("掃描條碼 (戶號):"))
+        scan_layout.addWidget(QLabel("掃描條碼:"))
         self.barcode_input = QLineEdit()
-        self.barcode_input.setPlaceholderText("請掃描條碼或輸入戶號...")
+        self.barcode_input.setPlaceholderText("請掃描條碼進行報到...")
         self.barcode_input.returnPressed.connect(self.process_check_in)
         scan_layout.addWidget(self.barcode_input)
         
@@ -127,7 +127,7 @@ class CheckInWindow(QWidget):
         self.check_in_table = QTableWidget()
         self.check_in_table.setColumnCount(4)
         self.check_in_table.setHorizontalHeaderLabels(
-            ["戶號", "住戶姓名", "報到時間", "狀態"]
+            ["戶號", "原始條碼", "報到時間", "狀態"]
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
@@ -143,10 +143,6 @@ class CheckInWindow(QWidget):
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh_check_in_list)
         button_layout.addWidget(refresh_button)
-        
-        barcode_setting_button = QPushButton("條碼設置")
-        barcode_setting_button.clicked.connect(self.open_barcode_settings)
-        button_layout.addWidget(barcode_setting_button)
         
         export_button = QPushButton("導出報到記錄")
         export_button.clicked.connect(self.export_check_in_data)
@@ -164,72 +160,47 @@ class CheckInWindow(QWidget):
         # 初始化數據
         self.refresh_check_in_list()
     
-    def open_barcode_settings(self):
-        """打開條碼設置對話框"""
-        households = self.db.get_all_households()
-        
-        if not households:
-            QMessageBox.warning(self, "警告", "沒有住戶數據")
-            return
-        
-        # 創建設置窗口
-        dialog = BarcodeSettingDialog(self)
-        
-        # 顯示住戶列表讓用戶選擇
-        household_names = [f"{h['household_id']} - {h['name']}" for h in households]
-        
-        # 簡化版：直接輸入戶號
-        household_id, ok = QMessageBox.question(
-            self, "選擇住戶", "請在條碼設置對話框中掃描或輸入戶號",
-            buttons=QMessageBox.StandardButton.Ok
-        )
-        
-        # 更簡單的方式：逐個設置
-        for household in households:
-            existing_barcode = self.db.get_barcode_by_household_id(household['household_id'])
-            dialog = BarcodeSettingDialog(self, household['household_id'], existing_barcode)
-            
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                barcode = dialog.get_barcode()
-                if barcode:
-                    if self.db.add_barcode_mapping(household['household_id'], barcode):
-                        QMessageBox.information(
-                            self, "成功",
-                            f"戶號 {household['household_id']} 的條碼已設置: {barcode}"
-                        )
-                    else:
-                        QMessageBox.critical(
-                            self, "錯誤",
-                            f"設置失敗，條碼可能已被其他戶號使用"
-                        )
-    
     def process_check_in(self):
-        """處理報到"""
+        """
+        處理報到 - 掃描結果與原始條碼做比對
+        
+        流程：
+        1. 清理掃描輸入（移除隱藏字符）
+        2. 與 .xlsx 原始條碼列做比對
+        3. 如果匹配 → 顯示對應戶號並報到
+        4. 如果不匹配 → 顯示錯誤
+        """
         # 【關鍵】清理掃描輸入 - 移除所有隱藏字符
         raw_input = self.barcode_input.text()
-        scanned_code = clean_barcode_input(raw_input)
+        scanned_barcode = clean_barcode_input(raw_input)
         
         # 調試輸出
-        if raw_input != scanned_code:
-            print_debug_info(raw_input, scanned_code)
+        if raw_input != scanned_barcode:
+            print_debug_info(raw_input, scanned_barcode)
         
-        if not scanned_code:
-            QMessageBox.warning(self, "警告", "請輸入條碼或戶號")
+        if not scanned_barcode:
+            QMessageBox.warning(self, "警告", "請掃描條碼")
             return
         
-        # 第一步：嘗試通過條碼映射查找戶號
-        household_id = self.db.get_household_id_by_barcode(scanned_code)
+        # 【關鍵】通過原始條碼查詢戶號
+        household_id = self.db.get_household_id_by_barcode(scanned_barcode)
         
-        # 第二步：如果沒找到，直接使用輸入作為戶號（向後相容）
         if not household_id:
-            household_id = scanned_code
+            QMessageBox.critical(
+                self, "錯誤", 
+                f"條碼 '{scanned_barcode}' 未找到對應戶號\n\n"
+                f"請檢查 .xlsx 文件中的原始條碼"
+            )
+            self.barcode_input.clear()
+            self.barcode_input.setFocus()
+            return
         
-        # 查找住戶（使用戶號）
+        # 查找住戶
         household = self.db.get_household(household_id)
         if not household:
             QMessageBox.critical(
                 self, "錯誤", 
-                f"戶號 {household_id} 不存在\n\n掃描結果: {scanned_code}"
+                f"戶號 {household_id} 不存在"
             )
             self.barcode_input.clear()
             self.barcode_input.setFocus()
@@ -240,7 +211,7 @@ class CheckInWindow(QWidget):
             # 重複報到 - 提醒但不執行
             QMessageBox.warning(
                 self, "重複報到", 
-                f"住戶 {household['name']} (戶號: {household_id}) 已報到\n\n請掃描下一筆資料"
+                f"戶號 {household_id} 已報到\n\n請掃描下一筆資料"
             )
             self.barcode_input.clear()
             self.barcode_input.setFocus()
@@ -248,7 +219,7 @@ class CheckInWindow(QWidget):
         
         # 執行報到
         if self.db.check_in_household(household_id):
-            # 正常報到 - 不顯示對話框，立即返回掃描區
+            # 正常報到 - 立即返回掃描區
             self.last_checked_in_household_id = household_id
             self.barcode_input.clear()
             self.barcode_input.setFocus()
@@ -299,7 +270,7 @@ class CheckInWindow(QWidget):
         
         # 查詢所有住戶及其報到信息
         cursor.execute("""
-            SELECT h.household_id, h.name, c.checked_in_at
+            SELECT h.household_id, c.checked_in_at
             FROM households h
             LEFT JOIN check_in_records c ON h.household_id = c.household_id
             ORDER BY h.household_id
@@ -309,42 +280,45 @@ class CheckInWindow(QWidget):
         conn.close()
         
         # 黃色背景色
-        yellow_brush = QColor(255, 255, 0)  # 黃色
+        yellow_brush = QColor(255, 255, 0)
         
         for row in rows:
             row_position = self.check_in_table.rowCount()
             self.check_in_table.insertRow(row_position)
             
+            household_id = row[0]
+            
             # 戶號
-            household_id_item = QTableWidgetItem(row[0])
-            # 住戶姓名
-            name_item = QTableWidgetItem(row[1])
+            household_id_item = QTableWidgetItem(household_id)
+            
+            # 原始條碼
+            barcode = self.db.get_barcode_by_household_id(household_id)
+            barcode_item = QTableWidgetItem(barcode or "")
             
             # 報到時間 - 只顯示時間部分 (HH:MM:SS)
-            if row[2]:
-                # 如果有報到時間，只提取時間部分
+            if row[1]:
                 try:
-                    checked_in_at = row[2].split(' ')[1] if ' ' in row[2] else row[2]
+                    checked_in_at = row[1].split(' ')[1] if ' ' in row[1] else row[1]
                 except:
-                    checked_in_at = row[2]
+                    checked_in_at = row[1]
             else:
                 checked_in_at = ""
             
             time_item = QTableWidgetItem(checked_in_at)
             
             # 狀態 - 已報到 或 尚未報到
-            status = "已報到" if row[2] else "尚未報到"
+            status = "已報到" if row[1] else "尚未報到"
             status_item = QTableWidgetItem(status)
             
             # 如果是最後一筆報到資料，設置黃色背景
-            if row[0] == self.last_checked_in_household_id:
+            if household_id == self.last_checked_in_household_id:
                 household_id_item.setBackground(yellow_brush)
-                name_item.setBackground(yellow_brush)
+                barcode_item.setBackground(yellow_brush)
                 time_item.setBackground(yellow_brush)
                 status_item.setBackground(yellow_brush)
             
             self.check_in_table.setItem(row_position, 0, household_id_item)
-            self.check_in_table.setItem(row_position, 1, name_item)
+            self.check_in_table.setItem(row_position, 1, barcode_item)
             self.check_in_table.setItem(row_position, 2, time_item)
             self.check_in_table.setItem(row_position, 3, status_item)
     
