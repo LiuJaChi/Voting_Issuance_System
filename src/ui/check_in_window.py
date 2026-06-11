@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from src.backend.database import Database
-from src.backend.barcode_generator import BarcodeGenerator
+from src.backend.check_in_printer import CheckInPrinter
 from src.backend.utils import format_datetime
 
 
@@ -20,50 +20,8 @@ class CheckInWindow(QWidget):
         """初始化報到窗口"""
         super().__init__(parent)
         self.db = Database()
-        self.barcode_gen = BarcodeGenerator()
-        # 構建 EAN-13 到戶號的反向映射
-        self.ean13_to_household_map = self._build_ean13_map()
         
         self.init_ui()
-    
-    def _build_ean13_map(self) -> dict:
-        """
-        構建 EAN-13 編碼到戶號的映射表
-        
-        Returns:
-            {ean13_code: household_id, ...}
-        """
-        mapping = {}
-        
-        # 獲取所有戶號
-        try:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT household_id FROM voters WHERE household_id IS NOT NULL")
-            households = cursor.fetchall()
-            conn.close()
-            
-            # 為每個戶號生成 EAN-13 編碼
-            for (household_id,) in households:
-                ean13 = self.barcode_gen._convert_to_ean13(household_id)
-                mapping[ean13] = household_id
-                
-        except Exception as e:
-            print(f"構建映射表失敗: {e}")
-        
-        return mapping
-    
-    def _convert_ean13_to_household_id(self, ean13_code: str) -> str:
-        """
-        將 EAN-13 編碼轉換回戶號
-        
-        Args:
-            ean13_code: EAN-13 編碼（例如：0600266100010）
-        
-        Returns:
-            戶號（例如：06-02F），如果找不到則返回原值
-        """
-        return self.ean13_to_household_map.get(ean13_code, ean13_code)
     
     def init_ui(self):
         """初始化用戶界面"""
@@ -93,9 +51,9 @@ class CheckInWindow(QWidget):
         
         # 條碼掃描輸入
         scan_layout = QHBoxLayout()
-        scan_layout.addWidget(QLabel("掃描條碼:"))
+        scan_layout.addWidget(QLabel("掃描條碼 (戶號):"))
         self.barcode_input = QLineEdit()
-        self.barcode_input.setPlaceholderText("請掃描條碼...")
+        self.barcode_input.setPlaceholderText("請掃描條碼或輸入戶號...")
         self.barcode_input.returnPressed.connect(self.process_check_in)
         scan_layout.addWidget(self.barcode_input)
         
@@ -105,7 +63,7 @@ class CheckInWindow(QWidget):
         self.check_in_table = QTableWidget()
         self.check_in_table.setColumnCount(4)
         self.check_in_table.setHorizontalHeaderLabels(
-            ["投票者ID", "條碼", "報到時間", "狀態"]
+            ["戶號", "住戶姓名", "報到時間", "狀態"]
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
@@ -143,38 +101,29 @@ class CheckInWindow(QWidget):
         scanned_code = self.barcode_input.text().strip()
         
         if not scanned_code:
-            QMessageBox.warning(self, "警告", "請輸入條碼")
+            QMessageBox.warning(self, "警告", "請輸入條碼或戶號")
             return
         
-        # 嘗試轉換 EAN-13 編碼到戶號
-        # 如果掃碼結果是 13 位數字，說明是 EAN-13 編碼，需要轉換
-        household_id = self._convert_ean13_to_household_id(scanned_code)
-        
-        # 查找投票者（使用戶號或原始掃碼值）
-        voter = self.db.get_voter(household_id)
-        if not voter:
-            # 如果用轉換後的戶號找不到，嘗試用原始掃碼值
-            voter = self.db.get_voter(scanned_code)
-            if not voter:
-                QMessageBox.critical(
-                    self, "錯誤", 
-                    f"條碼 {scanned_code} 不存在\n"
-                    f"轉換後: {household_id}"
-                )
-                self.barcode_input.clear()
-                return
-            household_id = scanned_code
+        # 查找住戶（使用戶號）
+        household = self.db.get_household(scanned_code)
+        if not household:
+            QMessageBox.critical(
+                self, "錯誤", 
+                f"戶號 {scanned_code} 不存在"
+            )
+            self.barcode_input.clear()
+            return
         
         # 執行報到
-        if self.db.check_in_voter(voter['voter_id'], household_id):
+        if self.db.check_in_household(scanned_code):
             QMessageBox.information(
                 self, "成功", 
-                f"投票者 {voter['voter_id']} (戶號: {household_id}) 報到成功"
+                f"住戶 {household['name']} (戶號: {scanned_code}) 報到成功"
             )
             self.barcode_input.clear()
             self.refresh_check_in_list()
         else:
-            QMessageBox.critical(self, "錯誤", "報到失敗，此投票者已報到或發生錯誤")
+            QMessageBox.critical(self, "錯誤", "報到失敗，此住戶已報到或發生錯誤")
             self.barcode_input.clear()
     
     def refresh_check_in_list(self):
@@ -192,11 +141,12 @@ class CheckInWindow(QWidget):
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
+        # 查詢所有住戶及其報到信息
         cursor.execute("""
-            SELECT v.voter_id, v.barcode, c.checked_in_at, v.status
-            FROM voters v
-            LEFT JOIN check_in_records c ON v.voter_id = c.voter_id
-            ORDER BY c.checked_in_at DESC
+            SELECT h.household_id, h.name, c.checked_in_at, h.status
+            FROM households h
+            LEFT JOIN check_in_records c ON h.household_id = c.household_id
+            ORDER BY h.household_id
         """)
         
         rows = cursor.fetchall()
@@ -206,12 +156,16 @@ class CheckInWindow(QWidget):
             row_position = self.check_in_table.rowCount()
             self.check_in_table.insertRow(row_position)
             
+            # 戶號
             self.check_in_table.setItem(row_position, 0, QTableWidgetItem(row[0]))
+            # 住戶姓名
             self.check_in_table.setItem(row_position, 1, QTableWidgetItem(row[1]))
             
+            # 報到時間
             checked_in_at = format_datetime(row[2]) if row[2] else "未報到"
             self.check_in_table.setItem(row_position, 2, QTableWidgetItem(checked_in_at))
-            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(row[3]))
+            # 狀態
+            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(row[3] or "pending"))
     
     def export_check_in_data(self):
         """導出報到數據"""
