@@ -205,7 +205,15 @@ class CheckInPrinter:
         格式：戶號 | 戶名 | 面積（坪） | 條碼
         
         Args:
-            households: [{'household_id': 'A106-02', 'name': '洪正平', 'share_amount': 129.03, 'barcode': 'A106-02'}, ...]
+            households: [
+                {
+                    'household_id': 'A106-02', 
+                    'name': '洪正平', 
+                    'share_amount': 129.03, 
+                    'barcode_data': 'A106-02'  # Excel 條碼欄位使用這個
+                }, 
+                ...
+            ]
             filename: 輸出文件名（默認為 報到.xlsx）
             
         Returns:
@@ -270,8 +278,8 @@ class CheckInPrinter:
                 cell_c.number_format = '0.00'
                 cell_c.border = thin_border
                 
-                # 條碼
-                barcode_str = household.get('barcode', '')
+                # 條碼 - 使用 barcode_data 欄位
+                barcode_str = household.get('barcode_data', '')
                 cell_d = worksheet.cell(row=row_idx, column=4, value=barcode_str)
                 cell_d.alignment = Alignment(horizontal='center', vertical='center')
                 cell_d.border = thin_border
@@ -290,7 +298,7 @@ class CheckInPrinter:
                 '戶號': [h['household_id'] for h in households],
                 '戶名': [h['name'] for h in households],
                 '面積（坪）': [h.get('share_amount', 0.0) for h in households],
-                '條碼': [h.get('barcode', '') for h in households]
+                '條碼': [h.get('barcode_data', '') for h in households]
             }
             df = pd.DataFrame(data)
             
@@ -318,7 +326,7 @@ class CheckInPrinter:
                         '戶號': household['household_id'],
                         '戶名': household['name'],
                         '面積（坪）': household.get('share_amount', 0.0),
-                        '條碼': household.get('barcode', '')
+                        '條碼': household.get('barcode_data', '')
                     })
             
             output_path = csv_path
