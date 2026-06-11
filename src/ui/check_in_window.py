@@ -143,7 +143,7 @@ class CheckInWindow(QWidget):
         
         # 查詢所有住戶及其報到信息
         cursor.execute("""
-            SELECT h.household_id, h.name, c.checked_in_at, h.status
+            SELECT h.household_id, h.name, c.checked_in_at
             FROM households h
             LEFT JOIN check_in_records c ON h.household_id = c.household_id
             ORDER BY h.household_id
@@ -161,11 +161,21 @@ class CheckInWindow(QWidget):
             # 住戶姓名
             self.check_in_table.setItem(row_position, 1, QTableWidgetItem(row[1]))
             
-            # 報到時間
-            checked_in_at = format_datetime(row[2]) if row[2] else "未報到"
+            # 報到時間 - 只顯示時間部分 (HH:MM:SS)
+            if row[2]:
+                # 如果有報到時間，只提取時間部分
+                try:
+                    checked_in_at = row[2].split(' ')[1] if ' ' in row[2] else row[2]
+                except:
+                    checked_in_at = row[2]
+            else:
+                checked_in_at = ""
+            
             self.check_in_table.setItem(row_position, 2, QTableWidgetItem(checked_in_at))
-            # 狀態
-            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(row[3] or "pending"))
+            
+            # 狀態 - 已報到 或 尚未報到
+            status = "已報到" if row[2] else "尚未報到"
+            self.check_in_table.setItem(row_position, 3, QTableWidgetItem(status))
     
     def export_check_in_data(self):
         """導出報到數據"""
