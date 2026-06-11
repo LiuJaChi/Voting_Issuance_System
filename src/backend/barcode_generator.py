@@ -1,5 +1,5 @@
 """
-條碼生成模塊 - 使用 python-barcode 生成 Code128 條碼
+條碼生成模塊 - 使用 python-barcode 生成 Code39 條碼
 """
 import barcode
 from barcode.writer import ImageWriter
@@ -9,7 +9,7 @@ import os
 
 
 class BarcodeGenerator:
-    """使用 python-barcode 生成 Code128 條碼"""
+    """使用 python-barcode 生成 Code39 條碼"""
 
     def __init__(self, output_dir: str = "exports/barcodes"):
         """初始化條碼生成器"""
@@ -34,9 +34,9 @@ class BarcodeGenerator:
         filepath = os.path.join(self.output_dir, filename)
         
         try:
-            # 生成 Code128 條碼
-            code128_class = barcode.get_barcode_class('code128')
-            bar = code128_class(barcode_data, writer=ImageWriter())
+            # 生成 Code39 條碼
+            code39_class = barcode.get_barcode_class('code39')
+            bar = code39_class(barcode_data, writer=ImageWriter())
             bar.save(filepath)
             
             return f"{filepath}.png"
