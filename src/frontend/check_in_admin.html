@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>報到管理看板</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .stats { display: flex; gap: 12px; margin-bottom: 12px; }
+    .box { border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px; min-width: 120px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+    th { background: #f7f7f7; }
+  </style>
+</head>
+<body>
+  <h2>即時報到統計</h2>
+
+  <div class="stats">
+    <div class="box">總報到筆數：<strong id="total">0</strong></div>
+    <div class="box">有效報到：<strong id="checked">0</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>戶號</th>
+        <th>名稱</th>
+        <th>報到時間</th>
+        <th>狀態</th>
+      </tr>
+    </thead>
+    <tbody id="records"></tbody>
+  </table>
+
+  <script>
+    const totalEl = document.getElementById('total');
+    const checkedEl = document.getElementById('checked');
+    const recordsEl = document.getElementById('records');
+
+    function renderRows(records) {
+      recordsEl.innerHTML = records.map(r => `
+        <tr>
+          <td>${r.id}</td>
+          <td>${r.household_id}</td>
+          <td>${r.name || ''}</td>
+          <td>${r.check_in_time}</td>
+          <td>${r.status}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function refresh() {
+      const [statsResp, recordsResp] = await Promise.all([
+        fetch('/api/check-in/statistics'),
+        fetch('/api/check-in/records')
+      ]);
+
+      const stats = await statsResp.json();
+      const recordsData = await recordsResp.json();
+
+      totalEl.textContent = stats.total_check_ins || 0;
+      checkedEl.textContent = stats.checked_in_count || 0;
+      renderRows(recordsData.records || []);
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>
