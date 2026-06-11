@@ -10,6 +10,8 @@
 報到.xlsx 導出欄位：戶號 | 戶名 | 面積（坪） | 條碼
 """
 import io
+import os
+import tempfile
 from pathlib import Path
 from typing import List, Dict
 
@@ -54,28 +56,43 @@ class CheckInPrinter:
         """初始化"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
+        self.temp_barcodes = []  # 存儲臨時條碼文件路徑
 
-    @staticmethod
-    def _generate_code128_image(content: str) -> io.BytesIO:
+    def _cleanup_temp_files(self):
+        """清理臨時條碼文件"""
+        for temp_path in self.temp_barcodes:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception as e:
+                print(f"清理臨時文件失敗 {temp_path}: {e}")
+        self.temp_barcodes = []
+
+    def _generate_code128_image(self, content: str) -> str:
         """
-        生成 Code128 條碼圖片，返回 BytesIO 流
+        生成 Code128 條碼圖片，返回文件路徑
         
-        使用 python-barcode 庫直接生成條碼圖像
+        使用 python-barcode 庫直接生成條碼圖像，保存為臨時文件
         
         Args:
             content: Code128 內容（例如 A106-02）
             
         Returns:
-            BytesIO 流（PNG 圖像）
+            條碼圖像文件路徑
         """
-        buf = io.BytesIO()
-        
         try:
+            # 建立臨時目錄存放條碼
+            temp_dir = tempfile.gettempdir()
+            
+            # 確保內容適合作為文件名
+            safe_content = content.replace('/', '_').replace('\\', '_')
+            temp_path = os.path.join(temp_dir, f"barcode_{safe_content}")
+            
             # 使用 python-barcode 生成 Code128 條碼
             code128_class = barcode.get_barcode_class('code128')
             writer = ImageWriter()
             
-            # 生成條碼
+            # 生成條碼實例
             bar = code128_class(content, writer=writer, add_checksum=False)
             
             # 條碼配置選項
@@ -87,14 +104,22 @@ class CheckInPrinter:
                 'quiet_zone': 2.0,        # 靜區寬度
             }
             
-            # 生成圖像到 BytesIO
-            bar.write(buf, options=options)
-            buf.seek(0)
+            # 保存條碼圖像到文件（不包含副檔名，barcode 會自動添加 .png）
+            bar.save(temp_path, options=options)
             
-            return buf
+            # barcode 庫自動添加 .png 副檔名
+            final_path = temp_path + '.png'
+            
+            # 記錄臨時文件，用於後續清理
+            if os.path.exists(final_path):
+                self.temp_barcodes.append(final_path)
+                print(f"✓ 條碼生成成功: {content} -> {final_path}")
+                return final_path
+            else:
+                raise FileNotFoundError(f"條碼文件未生成: {final_path}")
             
         except Exception as e:
-            print(f"Code128 條碼生成失敗 {content}: {e}")
+            print(f"✗ Code128 條碼生成失敗 {content}: {e}")
             raise
 
     def generate_pdf(
@@ -156,13 +181,13 @@ class CheckInPrinter:
             
             # 生成 Code128 條碼圖像
             try:
-                code128_buf = self._generate_code128_image(household_id)
-                # 嵌入條碼圖像到 PDF
-                code128_img = RLImage(code128_buf, width=cell_w * 0.85, height=12 * mm)
+                code128_path = self._generate_code128_image(household_id)
+                # 從文件讀取條碼圖像到 PDF
+                code128_img = RLImage(code128_path, width=cell_w * 0.85, height=12 * mm)
             except Exception as e:
                 print(f"條碼生成失敗 {household_id}: {e}")
                 # 如果生成失敗，顯示文字代替
-                code128_img = Paragraph(f"Barcode: {household_id}", household_id_style)
+                code128_img = Paragraph(f"Error: {household_id}", household_id_style)
             
             # 單元格內容：戶號（上方）+ 條碼圖像（下方）
             # 使用垂直排列
@@ -193,6 +218,7 @@ class CheckInPrinter:
             table_data.append(row_cells)
 
         if not table_data:
+            self._cleanup_temp_files()
             return output_path
 
         col_widths = [cell_w] * COLS_PER_PAGE
@@ -211,6 +237,10 @@ class CheckInPrinter:
         ]))
 
         doc.build([table])
+        
+        # 清理臨時文件
+        self._cleanup_temp_files()
+        
         return output_path
 
     def export_check_in_xlsx(
