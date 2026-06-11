@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>即時報到系統 - 掃描</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1;
+            background: #111;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        canvas {
+            display: none;
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            border: 3px solid #00ff00;
+            border-radius: 15px;
+            box-shadow: inset 0 0 20px rgba(0, 255, 0, 0.2);
+        }
+
+        .result {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            min-height: 100px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        .result.success {
+            background: #1a3a1a;
+            border: 2px solid #00ff00;
+        }
+
+        .result.error {
+            background: #3a1a1a;
+            border: 2px solid #ff0000;
+        }
+
+        .result.duplicate {
+            background: #3a3a1a;
+            border: 2px solid #ffff00;
+        }
+
+        .result-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .result-text {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .result-detail {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .info-box {
+            background: #1a1a1a;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 13px;
+            line-height: 1.8;
+            color: #bbb;
+            margin-bottom: 20px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-start {
+            background: #00ff00;
+            color: #000;
+        }
+
+        .btn-start:hover {
+            background: #00dd00;
+        }
+
+        .btn-start:disabled {
+            background: #666;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .btn-reset {
+            background: #0066ff;
+            color: #fff;
+        }
+
+        .btn-reset:hover {
+            background: #0055dd;
+        }
+
+        .btn-admin {
+            background: #666;
+            color: #fff;
+            flex: 0;
+        }
+
+        .btn-admin:hover {
+            background: #777;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #333;
+            border-top-color: #0ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 24px;
+            }
+
+            button {
+                padding: 12px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 QR Code 報到</h1>
+            <p>掃描報到單上的 QR Code</p>
+        </div>
+
+        <div class="camera-container">
+            <video id="videoEl" autoplay playsinline></video>
+            <canvas id="canvasEl"></canvas>
+            <div class="crosshair"></div>
+        </div>
+
+        <div id="resultEl" class="result hidden">
+            <div class="result-icon" id="resultIcon">-</div>
+            <div class="result-text" id="resultText">-</div>
+            <div class="result-detail" id="resultDetail">-</div>
+        </div>
+
+        <div class="info-box">
+            <div>📌 <strong>掃描說明：</strong></div>
+            <div>1. 確保光線充足</div>
+            <div>2. 將 QR Code 對準綠色方框</div>
+            <div>3. 掃描成功後會自動報到</div>
+        </div>
+
+        <div class="button-group">
+            <button class="btn-start" id="startBtn" onclick="startScanning()">🎥 開始掃描</button>
+            <button class="btn-admin" onclick="window.location.href='/admin'">📊 統計</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api/check-in';
+        const SCAN_COOLDOWN_MS = 2000;
+        let videoEl = null;
+        let canvasEl = null;
+        let isScanning = false;
+        let lastScanTime = 0;
+
+        function setText(el, text, cssClass = '') {
+            el.textContent = text;
+            el.className = cssClass ? `${el.className.split(' ')[0]} ${cssClass}` : el.className;
+        }
+
+        async function startScanning() {
+            try {
+                const startBtn = document.getElementById('startBtn');
+                videoEl = document.getElementById('videoEl');
+                canvasEl = document.getElementById('canvasEl');
+
+                startBtn.disabled = true;
+                startBtn.innerHTML = '<div class="loading"></div> 初始化相機...';
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+
+                videoEl.srcObject = stream;
+                isScanning = true;
+
+                startBtn.style.display = 'none';
+                scanFrame();
+            } catch (error) {
+                alert('無法訪問相機：' + error.message);
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('startBtn').textContent = '🎥 開始掃描';
+            }
+        }
+
+        function scanFrame() {
+            if (!isScanning) return;
+
+            const ctx = canvasEl.getContext('2d');
+            canvasEl.width = videoEl.videoWidth;
+            canvasEl.height = videoEl.videoHeight;
+
+            ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+
+            const imageData = ctx.getImageData(0, 0, canvasEl.width, canvasEl.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (code && (Date.now() - lastScanTime) > SCAN_COOLDOWN_MS) {
+                lastScanTime = Date.now();
+                handleQRCode(code.data);
+            }
+
+            requestAnimationFrame(scanFrame);
+        }
+
+        async function handleQRCode(data) {
+            try {
+                let payload = null;
+
+                try {
+                    payload = JSON.parse(data);
+                } catch {
+                    payload = { household_id: data };
+                }
+
+                if (!payload.household_id) {
+                    showResult('❌', '無效的 QR Code', '無法解析戶號', 'error');
+                    return;
+                }
+
+                showResult('⏳', '報到中...', '正在發送...', '');
+
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        household_id: payload.household_id,
+                        name: payload.name
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const detail = `戶號：${payload.household_id}${payload.name ? '\n姓名：' + payload.name : ''}`;
+                    showResult('✓', '報到成功！', detail, 'success');
+                } else if (response.status === 409) {
+                    showResult('⚠️', '已報到', `戶號 ${payload.household_id} 已經報到過了`, 'duplicate');
+                } else {
+                    showResult('❌', '報到失敗', result.message || '未知錯誤', 'error');
+                }
+            } catch (error) {
+                showResult('❌', '錯誤', error.message, 'error');
+            }
+        }
+
+        function showResult(icon, text, detail, cssClass) {
+            const resultEl = document.getElementById('resultEl');
+            document.getElementById('resultIcon').textContent = icon;
+            document.getElementById('resultText').textContent = text;
+            document.getElementById('resultDetail').textContent = detail;
+            
+            resultEl.className = `result ${cssClass}`;
+            resultEl.classList.remove('hidden');
+
+            if (cssClass === 'success' || cssClass === 'duplicate') {
+                setTimeout(() => {
+                    resultEl.classList.add('hidden');
+                }, 3000);
+            }
+        }
+
+        // 確保頁面卸載時停止掃描
+        window.addEventListener('beforeunload', () => {
+            isScanning = false;
+            if (videoEl && videoEl.srcObject) {
+                videoEl.srcObject.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
