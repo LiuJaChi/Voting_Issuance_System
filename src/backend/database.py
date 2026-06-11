@@ -1,5 +1,5 @@
 """
-數據庫管理模塊
+數據庫管理模塊 - 支持住戶面積（持分）
 """
 import sqlite3
 import json
@@ -40,11 +40,12 @@ class Database:
             )
         """)
 
-        # 住戶表（以戶號為主鍵）
+        # 住戶表（以戶號為主鍵）- 新增 share_amount 欄位
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS households (
                 household_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                share_amount REAL DEFAULT 0.0,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -97,6 +98,17 @@ class Database:
         """)
 
         conn.commit()
+        
+        # 檢查是否需要添加 share_amount 欄位（用於數據庫升級）
+        cursor.execute("PRAGMA table_info(households)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'share_amount' not in columns:
+            cursor.execute("""
+                ALTER TABLE households ADD COLUMN share_amount REAL DEFAULT 0.0
+            """)
+            conn.commit()
+        
         conn.close()
 
     # ─────────────────────────── 配置管理 ───────────────────────────
@@ -124,15 +136,15 @@ class Database:
 
     # ─────────────────────────── 住戶管理 ───────────────────────────
 
-    def add_household(self, household_id: str, name: str) -> bool:
-        """新增住戶"""
+    def add_household(self, household_id: str, name: str, share_amount: float = 0.0) -> bool:
+        """新增住戶（支持面積/持分）"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT INTO households (household_id, name)
-                VALUES (?, ?)
-            """, (household_id, name))
+                INSERT INTO households (household_id, name, share_amount)
+                VALUES (?, ?, ?)
+            """, (household_id, name, share_amount))
             conn.commit()
             conn.close()
             return True
@@ -140,13 +152,20 @@ class Database:
             conn.close()
             return False
 
-    def update_household(self, household_id: str, name: str) -> bool:
-        """更新住戶姓名"""
+    def update_household(self, household_id: str, name: str, share_amount: float = None) -> bool:
+        """更新住戶信息"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE households SET name = ? WHERE household_id = ?
-        """, (name, household_id))
+        
+        if share_amount is not None:
+            cursor.execute("""
+                UPDATE households SET name = ?, share_amount = ? WHERE household_id = ?
+            """, (name, share_amount, household_id))
+        else:
+            cursor.execute("""
+                UPDATE households SET name = ? WHERE household_id = ?
+            """, (name, household_id))
+        
         conn.commit()
         conn.close()
         return True
@@ -187,7 +206,8 @@ class Database:
         success = 0
         failed = 0
         for h in households:
-            if self.add_household(h['household_id'], h['name']):
+            share_amount = h.get('share_amount', 0.0)
+            if self.add_household(h['household_id'], h['name'], share_amount):
                 success += 1
             else:
                 failed += 1
