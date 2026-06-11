@@ -18,6 +18,7 @@ from src.ui.voting_window import VotingWindow
 from src.ui.results_window import ResultsWindow
 from src.ui.setup_dialog import SetupDialog
 from src.ui.voting_item_dialog import VotingItemDialog
+from src.ui.household_manager_dialog import HouseholdManagerDialog
 
 
 class MainWindow(QMainWindow):
@@ -122,11 +123,10 @@ class MainWindow(QMainWindow):
 
     def manage_households(self):
         """管理住戶"""
-        QMessageBox.information(
-            self, "住戶管理", 
-            "請在報到管理標籤中查看和管理所有住戶資料。"
-        )
-        # TODO: 可在後續實現更詳細的住戶管理功能
+        dialog = HouseholdManagerDialog(self)
+        dialog.exec()
+        # 刷新報到窗口數據
+        self.check_in_window.refresh_check_in_list()
 
     def open_voting_items_dialog(self):
         """打開投票項目管理對話框"""
@@ -138,15 +138,14 @@ class MainWindow(QMainWindow):
         """打印報到單 PDF"""
         try:
             # 從數據庫獲取所有住戶
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT household_id, name FROM voters WHERE household_id IS NOT NULL ORDER BY household_id")
-            households = cursor.fetchall()
-            conn.close()
-
+            households = self.db.get_all_households()
+            
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成報到單")
                 return
+
+            # 將住戶數據轉換為 (household_id, name) 元組列表
+            household_tuples = [(h['household_id'], h['name']) for h in households]
 
             # 選擇輸出位置
             filename, _ = QFileDialog.getSaveFileName(
@@ -161,7 +160,7 @@ class MainWindow(QMainWindow):
 
             # 生成 PDF
             printer = CheckInPrinter(output_dir="exports/check_in_ballots")
-            output_path = printer.generate_pdf(households, filename=filename.split('/')[-1])
+            output_path = printer.generate_pdf(household_tuples, filename=filename.split('/')[-1])
 
             QMessageBox.information(
                 self, "成功",
@@ -185,11 +184,7 @@ class MainWindow(QMainWindow):
         """生成條碼圖片"""
         try:
             # 從數據庫獲取所有住戶
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT household_id FROM voters WHERE household_id IS NOT NULL ORDER BY household_id")
-            households = cursor.fetchall()
-            conn.close()
+            households = self.db.get_all_households()
 
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成條碼")
@@ -207,7 +202,7 @@ class MainWindow(QMainWindow):
 
             # 生成條碼
             generator = BarcodeGenerator(output_dir=output_dir)
-            household_ids = [h[0] for h in households]
+            household_ids = [h['household_id'] for h in households]
             generator.generate_barcodes(household_ids)
 
             QMessageBox.information(
