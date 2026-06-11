@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>即時報到掃描</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    video { width: 100%; max-width: 420px; background: #000; border-radius: 8px; }
+    .card { margin-top: 12px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; }
+    .ok { color: #0a7f2e; }
+    .warn { color: #b35c00; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>手機即時報到掃描</h2>
+  <video id="preview" playsinline autoplay muted></video>
+  <canvas id="canvas" hidden></canvas>
+
+  <div class="card">
+    <div>掃描結果：<span id="scanResult">等待掃描...</span></div>
+    <div>後端回應：<span id="apiResult">尚未送出</span></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  <script>
+    const video = document.getElementById('preview');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scanResult = document.getElementById('scanResult');
+    const apiResult = document.getElementById('apiResult');
+
+    const SCAN_COOLDOWN_MS = 2000;
+    let lockUntil = 0;
+
+    function setText(el, text, cssClass='') {
+      el.textContent = text;
+      el.className = cssClass;
+    }
+
+    function parsePayload(raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        return {
+          household_id: String(parsed.household_id || '').trim(),
+          name: String(parsed.name || '').trim(),
+          status: 'checked_in'
+        };
+      } catch (e) {
+        return { household_id: String(raw || '').trim(), name: '', status: 'checked_in' };
+      }
+    }
+
+    async function sendCheckIn(rawValue) {
+      const payload = parsePayload(rawValue);
+      if (!payload.household_id) {
+        setText(apiResult, 'QR 內容缺少 household_id', 'err');
+        return;
+      }
+
+      try {
+        const resp = await fetch('/api/check-in', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+
+        if (resp.ok && data.success) {
+          setText(apiResult, `已報到：${payload.household_id} (${data.record.check_in_time})`, 'ok');
+        } else if (resp.status === 409) {
+          setText(apiResult, `重複報到：${payload.household_id}`, 'warn');
+        } else {
+          setText(apiResult, data.message || '送出失敗', 'err');
+        }
+      } catch (err) {
+        setText(apiResult, `連線錯誤：${err.message}`, 'err');
+      }
+    }
+
+    function tick() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+        const now = Date.now();
+        if (code && now >= lockUntil) {
+          const value = (code.data || '').trim();
+          if (value) {
+            lockUntil = now + SCAN_COOLDOWN_MS;
+            setText(scanResult, value, 'ok');
+            sendCheckIn(value);
+          }
+        }
+      }
+      requestAnimationFrame(tick);
+    }
+
+    async function start() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false
+        });
+        video.srcObject = stream;
+        video.play();
+        requestAnimationFrame(tick);
+      } catch (err) {
+        setText(apiResult, `無法啟用相機：${err.message}`, 'err');
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>

@@ -187,3 +187,19 @@ MIT
 ## 聯繫方式
 
 如有任何問題或建議，歡迎提交 Issue 或 Pull Request。
+
+
+## 即時報到 Web API（QR Code）
+
+新增 Flask 即時報到服務：
+
+```bash
+python -m src.backend.check_in_api
+```
+
+- 掃描頁：`/scanner`
+- 管理頁：`/admin`
+- API：`POST /api/check-in`、`GET /api/check-in/records`、`GET /api/check-in/statistics`
+
+`src/backend/check_in_printer.py` 已改為產生 QR Code（JSON：household_id/name/share_amount）並維持 2 欄 × 8 列 PDF 標籤格式。
+

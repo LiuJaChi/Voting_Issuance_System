@@ -1,6 +1,7 @@
 """
 數據庫管理模塊 - 支持住戶面積（持分）
 """
+import os
 import sqlite3
 import json
 from datetime import datetime
@@ -530,3 +531,129 @@ class Database:
         cursor.execute("DELETE FROM households")
         conn.commit()
         conn.close()
+
+
+class CheckInDatabase:
+    """即時報到 API 專用數據庫"""
+
+    def __init__(self, db_path: str = None):
+        initial_db_path = db_path or os.getenv('CHECK_IN_DB_PATH', 'data/check_in.db')
+        data_dir = Path('data').resolve()
+        candidate = Path(initial_db_path)
+
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+
+        if candidate != data_dir and data_dir not in candidate.parents:
+            candidate = data_dir / 'check_in.db'
+
+        self.db_path = str(candidate)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self.init_db()
+
+    def get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def init_db(self):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS check_in_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                household_id TEXT NOT NULL UNIQUE,
+                name TEXT DEFAULT '',
+                check_in_time TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL DEFAULT 'checked_in'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    def add_check_in_record(self, household_id: str, name: str = '', status: str = 'checked_in') -> Dict:
+        """新增報到記錄。
+
+        Returns:
+            {
+                'success': bool,
+                'message': 'checked_in' 或 'duplicate_check_in',
+                'record': dict
+            }
+        """
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, household_id, name, check_in_time, created_at, status FROM check_in_records WHERE household_id = ?",
+            (household_id,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            conn.close()
+            return {
+                'success': False,
+                'message': 'duplicate_check_in',
+                'record': dict(existing),
+            }
+
+        check_in_time = datetime.now().isoformat(timespec='seconds')
+        cursor.execute(
+            """
+            INSERT INTO check_in_records (household_id, name, check_in_time, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (household_id, name, check_in_time, status)
+        )
+        record_id = cursor.lastrowid
+        conn.commit()
+
+        cursor.execute(
+            """
+            SELECT id, household_id, name, check_in_time, created_at, status
+            FROM check_in_records
+            WHERE id = ?
+            """,
+            (record_id,)
+        )
+        created = cursor.fetchone()
+        conn.close()
+
+        return {
+            'success': True,
+            'message': 'checked_in',
+            'record': dict(created),
+        }
+
+    def get_check_in_records(self) -> List[Dict]:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, household_id, name, check_in_time, created_at, status
+            FROM check_in_records
+            ORDER BY check_in_time DESC
+            """
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_check_in_statistics(self) -> Dict:
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) AS total_check_ins FROM check_in_records")
+        total_check_ins = cursor.fetchone()['total_check_ins']
+
+        cursor.execute(
+            "SELECT COUNT(*) AS checked_in_count FROM check_in_records WHERE status = 'checked_in'"
+        )
+        checked_in_count = cursor.fetchone()['checked_in_count']
+
+        conn.close()
+        return {
+            'total_check_ins': total_check_ins,
+            'checked_in_count': checked_in_count,
+        }

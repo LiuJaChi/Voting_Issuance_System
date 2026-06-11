@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>報到管理看板</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .stats { display: flex; gap: 12px; margin-bottom: 12px; }
+    .box { border: 1px solid #ddd; border-radius: 8px; padding: 10px 14px; min-width: 120px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+    th { background: #f7f7f7; }
+  </style>
+</head>
+<body>
+  <h2>即時報到統計</h2>
+
+  <div class="stats">
+    <div class="box">總報到筆數：<strong id="total">0</strong></div>
+    <div class="box">有效報到：<strong id="checked">0</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>戶號</th>
+        <th>名稱</th>
+        <th>報到時間</th>
+        <th>狀態</th>
+      </tr>
+    </thead>
+    <tbody id="records"></tbody>
+  </table>
+
+  <script>
+    const REFRESH_INTERVAL_MS = 5000;
+    const totalEl = document.getElementById('total');
+    const checkedEl = document.getElementById('checked');
+    const recordsEl = document.getElementById('records');
+
+    function renderRows(records) {
+      recordsEl.innerHTML = '';
+      for (const r of records) {
+        const tr = document.createElement('tr');
+        for (const value of [r.id, r.household_id, r.name || '', r.check_in_time, r.status]) {
+          const td = document.createElement('td');
+          td.textContent = value ?? '';
+          tr.appendChild(td);
+        }
+        recordsEl.appendChild(tr);
+      }
+    }
+
+    async function refresh() {
+      try {
+        const [statsResp, recordsResp] = await Promise.all([
+          fetch('/api/check-in/statistics'),
+          fetch('/api/check-in/records')
+        ]);
+
+        if (!statsResp.ok || !recordsResp.ok) {
+          throw new Error('API 回應異常');
+        }
+
+        const stats = await statsResp.json();
+        const recordsData = await recordsResp.json();
+
+        totalEl.textContent = stats.total_check_ins || 0;
+        checkedEl.textContent = stats.checked_in_count || 0;
+        renderRows(recordsData.records || []);
+      } catch (err) {
+        totalEl.textContent = '-';
+        checkedEl.textContent = '-';
+        recordsEl.innerHTML = `<tr><td colspan="5">資料更新失敗：${err.message}</td></tr>`;
+      }
+    }
+
+    refresh();
+    setInterval(refresh, REFRESH_INTERVAL_MS);
+  </script>
+</body>
+</html>
