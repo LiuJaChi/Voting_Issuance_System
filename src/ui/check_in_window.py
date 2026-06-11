@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from src.backend.database import Database
+from src.backend.barcode_generator import BarcodeGenerator
 from src.backend.utils import format_datetime
 
 
@@ -19,8 +20,50 @@ class CheckInWindow(QWidget):
         """初始化報到窗口"""
         super().__init__(parent)
         self.db = Database()
+        self.barcode_gen = BarcodeGenerator()
+        # 構建 EAN-13 到戶號的反向映射
+        self.ean13_to_household_map = self._build_ean13_map()
         
         self.init_ui()
+    
+    def _build_ean13_map(self) -> dict:
+        """
+        構建 EAN-13 編碼到戶號的映射表
+        
+        Returns:
+            {ean13_code: household_id, ...}
+        """
+        mapping = {}
+        
+        # 獲取所有戶號
+        try:
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT household_id FROM voters WHERE household_id IS NOT NULL")
+            households = cursor.fetchall()
+            conn.close()
+            
+            # 為每個戶號生成 EAN-13 編碼
+            for (household_id,) in households:
+                ean13 = self.barcode_gen._convert_to_ean13(household_id)
+                mapping[ean13] = household_id
+                
+        except Exception as e:
+            print(f"構建映射表失敗: {e}")
+        
+        return mapping
+    
+    def _convert_ean13_to_household_id(self, ean13_code: str) -> str:
+        """
+        將 EAN-13 編碼轉換回戶號
+        
+        Args:
+            ean13_code: EAN-13 編碼（例如：0600266100010）
+        
+        Returns:
+            戶號（例如：06-02F），如果找不到則返回原值
+        """
+        return self.ean13_to_household_map.get(ean13_code, ean13_code)
     
     def init_ui(self):
         """初始化用戶界面"""
@@ -97,22 +140,37 @@ class CheckInWindow(QWidget):
     
     def process_check_in(self):
         """處理報到"""
-        barcode = self.barcode_input.text().strip()
+        scanned_code = self.barcode_input.text().strip()
         
-        if not barcode:
+        if not scanned_code:
             QMessageBox.warning(self, "警告", "請輸入條碼")
             return
         
-        # 查找投票者
-        voter = self.db.get_voter(barcode)
+        # 嘗試轉換 EAN-13 編碼到戶號
+        # 如果掃碼結果是 13 位數字，說明是 EAN-13 編碼，需要轉換
+        household_id = self._convert_ean13_to_household_id(scanned_code)
+        
+        # 查找投票者（使用戶號或原始掃碼值）
+        voter = self.db.get_voter(household_id)
         if not voter:
-            QMessageBox.critical(self, "錯誤", f"條碼 {barcode} 不存在")
-            self.barcode_input.clear()
-            return
+            # 如果用轉換後的戶號找不到，嘗試用原始掃碼值
+            voter = self.db.get_voter(scanned_code)
+            if not voter:
+                QMessageBox.critical(
+                    self, "錯誤", 
+                    f"條碼 {scanned_code} 不存在\n"
+                    f"轉換後: {household_id}"
+                )
+                self.barcode_input.clear()
+                return
+            household_id = scanned_code
         
         # 執行報到
-        if self.db.check_in_voter(voter['voter_id'], barcode):
-            QMessageBox.information(self, "成功", f"投票者 {voter['voter_id']} 報到成功")
+        if self.db.check_in_voter(voter['voter_id'], household_id):
+            QMessageBox.information(
+                self, "成功", 
+                f"投票者 {voter['voter_id']} (戶號: {household_id}) 報到成功"
+            )
             self.barcode_input.clear()
             self.refresh_check_in_list()
         else:
