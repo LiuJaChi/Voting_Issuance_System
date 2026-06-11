@@ -1,18 +1,17 @@
 """
-報到單 PDF 生成模塊
+報到單 PDF 生成模塊 - 使用 QR Code
 
 報到單規格：
-- 條碼內容：戶號（例如 06-02F）
+- QR Code 內容：戶號（例如 06-02F）
 - 每張大小：BARCODE 標籤尺寸（90mm × 35mm）
 - 每頁 A4：2 欄 × 8 列 = 最多 16 張
-- 內容：戶號 + 姓名 + EAN-13 條碼
+- 內容：戶號 + 姓名 + QR Code
 """
 import io
 from pathlib import Path
 from typing import List, Tuple
 
-import barcode as bc
-from barcode.writer import ImageWriter
+import qrcode
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -31,16 +30,8 @@ COLS_PER_PAGE = 2
 ROWS_PER_PAGE = 8
 
 
-class CustomEAN13Writer(ImageWriter):
-    """自訂 EAN-13 Writer - 隱藏編碼文字"""
-    
-    def _text(self, code):
-        """隱藏 EAN-13 編碼文字"""
-        return ""
-
-
 class CheckInPrinter:
-    """報到單 PDF 生成器"""
+    """報到單 PDF 生成器 - 使用 QR Code"""
 
     def __init__(self, output_dir: str = "exports/check_in_ballots"):
         """初始化"""
@@ -48,59 +39,36 @@ class CheckInPrinter:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
-    def _convert_to_ean13(data: str) -> str:
+    def _generate_qrcode_image(content: str) -> io.BytesIO:
         """
-        將任意字符串轉換為 EAN-13 格式（13 位數字）
+        生成 QR Code 圖片，返回 BytesIO 流
         
         Args:
-            data: 輸入數據（例如：06-02F）
-        
+            content: QR Code 內容（戶號）
+            
         Returns:
-            13 位 EAN-13 編碼字符串
+            BytesIO 流
         """
-        # 移除非數字字符，只保留數字
-        digits_only = ''.join(c for c in data if c.isdigit())
-        
-        # 如果沒有數字，使用原始數據的 ASCII 值轉換
-        if not digits_only:
-            digits_only = ''.join(str(ord(c) % 10) for c in data)
-        
-        # 取前 12 位，不足則補 0
-        ean_base = (digits_only + '0' * 12)[:12]
-        
-        # 計算 EAN-13 校驗碼
-        total = 0
-        for i, digit in enumerate(ean_base):
-            weight = 1 if i % 2 == 0 else 3
-            total += int(digit) * weight
-        
-        checksum = (10 - (total % 10)) % 10
-        ean13 = ean_base + str(checksum)
-        
-        return ean13
-
-    def _generate_barcode_image(self, content: str) -> io.BytesIO:
-        """生成 EAN-13 條碼圖片，返回 BytesIO 流"""
         buf = io.BytesIO()
         
-        # 將戶號轉換為 EAN-13 編碼
-        ean13_content = self._convert_to_ean13(content)
+        # 生成 QR Code
+        qr = qrcode.QRCode(
+            version=1,  # 自動調整大小
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=1,
+        )
         
-        # 使用 EAN-13 格式生成條碼
-        ean13_cls = bc.get_barcode_class('ean13')
-        writer = CustomEAN13Writer()
-        bar = ean13_cls(ean13_content, writer=writer)
-
-        options = {
-            'module_height': 8.0,
-            'module_width': 0.3,
-            'quiet_zone': 2.0,
-            'font_size': 6,
-            'text_distance': 2.0,
-            'write_text': False,  # ✅ 隱藏編碼文字
-        }
-        bar.write(buf, options=options)
+        qr.add_data(content)
+        qr.make(fit=True)
+        
+        # 創建圖片
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        # 保存到 BytesIO
+        img.save(buf, format='PNG')
         buf.seek(0)
+        
         return buf
 
     def generate_pdf(
@@ -160,18 +128,18 @@ class CheckInPrinter:
         row_cells = []
 
         for idx, (household_id, name) in enumerate(households):
-            # 生成條碼圖片
+            # 生成 QR Code 圖片
             try:
-                barcode_buf = self._generate_barcode_image(household_id)
-                barcode_img = RLImage(barcode_buf, width=cell_w * 0.75, height=18 * mm)
+                qrcode_buf = self._generate_qrcode_image(household_id)
+                qrcode_img = RLImage(qrcode_buf, width=20 * mm, height=20 * mm)
             except Exception as e:
-                print(f"條碼生成失敗 {household_id}: {e}")
-                barcode_img = Paragraph(f"[條碼: {household_id}]", center_style)
+                print(f"QR Code 生成失敗 {household_id}: {e}")
+                qrcode_img = Paragraph(f"[QR: {household_id}]", center_style)
 
             cell_content = [
                 Paragraph(f"<b>{household_id}</b>", center_style),
                 Paragraph(name, id_style),
-                barcode_img,
+                qrcode_img,
             ]
 
             row_cells.append(cell_content)
