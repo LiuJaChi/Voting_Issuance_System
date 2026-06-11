@@ -3,7 +3,7 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView
+    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView, QDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -11,6 +11,61 @@ from PyQt6.QtGui import QFont, QColor
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
 from src.backend.utils import format_datetime
+
+
+class BarcodeSettingDialog(QDialog):
+    """條碼對應設置對話框"""
+    
+    def __init__(self, parent=None, household_id: str = None, existing_barcode: str = None):
+        """
+        初始化對話框
+        
+        Args:
+            parent: 父窗口
+            household_id: 戶號
+            existing_barcode: 已存在的條碼
+        """
+        super().__init__(parent)
+        self.household_id = household_id
+        self.existing_barcode = existing_barcode
+        self.barcode_result = None
+        self.init_ui()
+    
+    def init_ui(self):
+        """初始化UI"""
+        self.setWindowTitle("設置條碼對應")
+        self.setGeometry(100, 100, 400, 150)
+        
+        layout = QVBoxLayout()
+        
+        # 戶號標籤
+        layout.addWidget(QLabel(f"戶號: {self.household_id}"))
+        
+        # 條碼輸入
+        layout.addWidget(QLabel("請掃描條碼或輸入條碼數據:"))
+        self.barcode_input = QLineEdit()
+        if self.existing_barcode:
+            self.barcode_input.setText(self.existing_barcode)
+        self.barcode_input.setPlaceholderText("掃描或輸入條碼...")
+        layout.addWidget(self.barcode_input)
+        
+        # 按鈕
+        button_layout = QHBoxLayout()
+        
+        confirm_btn = QPushButton("確認")
+        confirm_btn.clicked.connect(self.accept)
+        button_layout.addWidget(confirm_btn)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def get_barcode(self) -> str:
+        """獲取條碼"""
+        return self.barcode_input.text().strip()
 
 
 class CheckInWindow(QWidget):
@@ -81,6 +136,10 @@ class CheckInWindow(QWidget):
         refresh_button.clicked.connect(self.refresh_check_in_list)
         button_layout.addWidget(refresh_button)
         
+        barcode_setting_button = QPushButton("條碼設置")
+        barcode_setting_button.clicked.connect(self.open_barcode_settings)
+        button_layout.addWidget(barcode_setting_button)
+        
         export_button = QPushButton("導出報到記錄")
         export_button.clicked.connect(self.export_check_in_data)
         button_layout.addWidget(export_button)
@@ -97,54 +156,44 @@ class CheckInWindow(QWidget):
         # 初始化數據
         self.refresh_check_in_list()
     
-    def extract_household_id(self, barcode_text: str) -> str:
-        """
-        從掃描的條碼中提取戶號
+    def open_barcode_settings(self):
+        """打開條碼設置對話框"""
+        households = self.db.get_all_households()
         
-        條碼可能包含額外的字符，需要提取有效的戶號格式
-        戶號格式：數字-數字字母 (例如：06-02F, 06-03A)
+        if not households:
+            QMessageBox.warning(self, "警告", "沒有住戶數據")
+            return
         
-        Args:
-            barcode_text: 掃描的原始條碼文本
+        # 創建設置窗口
+        dialog = BarcodeSettingDialog(self)
+        
+        # 顯示住戶列表讓用戶選擇
+        household_names = [f"{h['household_id']} - {h['name']}" for h in households]
+        
+        # 簡化版：直接輸入戶號
+        household_id, ok = QMessageBox.question(
+            self, "選擇住戶", "請在條碼設置對話框中掃描或輸入戶號",
+            buttons=QMessageBox.StandardButton.Ok
+        )
+        
+        # 更簡單的方式：逐個設置
+        for household in households:
+            existing_barcode = self.db.get_barcode_by_household_id(household['household_id'])
+            dialog = BarcodeSettingDialog(self, household['household_id'], existing_barcode)
             
-        Returns:
-            提取的戶號，或原始文本（如果無法提取）
-        """
-        import re
-        
-        # 戶號格式：2位數字-2位數字+1個字母或2位數字
-        # 例如：06-02F, 06-03A
-        pattern = r'(\d{1,2}-\d{1,2}[A-Z]?)'
-        
-        match = re.search(pattern, barcode_text)
-        if match:
-            return match.group(1)
-        
-        # 如果找不到標準格式，返回原始文本
-        return barcode_text
-    
-    def is_household_checked_in(self, household_id: str) -> bool:
-        """
-        檢查住戶是否已報到
-        
-        Args:
-            household_id: 戶號
-            
-        Returns:
-            True 如果已報到，False 如果尚未報到
-        """
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT checked_in_at FROM check_in_records 
-            WHERE household_id = ?
-        """, (household_id,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result is not None
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                barcode = dialog.get_barcode()
+                if barcode:
+                    if self.db.add_barcode_mapping(household['household_id'], barcode):
+                        QMessageBox.information(
+                            self, "成功",
+                            f"戶號 {household['household_id']} 的條碼已設置: {barcode}"
+                        )
+                    else:
+                        QMessageBox.critical(
+                            self, "錯誤",
+                            f"設置失敗，條碼可能已被其他戶號使用"
+                        )
     
     def process_check_in(self):
         """處理報到"""
@@ -154,8 +203,12 @@ class CheckInWindow(QWidget):
             QMessageBox.warning(self, "警告", "請輸入條碼或戶號")
             return
         
-        # 從條碼中提取戶號
-        household_id = self.extract_household_id(scanned_code)
+        # 第一步：嘗試通過條碼映射查找戶號
+        household_id = self.db.get_household_id_by_barcode(scanned_code)
+        
+        # 第二步：如果沒找到，直接使用輸入作為戶號（向後相容）
+        if not household_id:
+            household_id = scanned_code
         
         # 查找住戶（使用戶號）
         household = self.db.get_household(household_id)
@@ -191,6 +244,29 @@ class CheckInWindow(QWidget):
             QMessageBox.critical(self, "錯誤", "報到失敗，請聯繫管理員")
             self.barcode_input.clear()
             self.barcode_input.setFocus()
+    
+    def is_household_checked_in(self, household_id: str) -> bool:
+        """
+        檢查住戶是否已報到
+        
+        Args:
+            household_id: 戶號
+            
+        Returns:
+            True 如果已報到，False 如果尚未報到
+        """
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT checked_in_at FROM check_in_records 
+            WHERE household_id = ?
+        """, (household_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result is not None
     
     def refresh_check_in_list(self):
         """刷新報到列表"""
