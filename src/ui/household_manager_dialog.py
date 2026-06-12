@@ -1,5 +1,5 @@
 """
-住戶管理對話框 - 支持 .xlsx/.csv 格式
+住戶管理對話框 - 支持 .xlsx/.csv 格式，附加進度條顯示
 欄位支持：戶號 | 戶名 | 面積（坪）
 """
 import csv
@@ -9,7 +9,7 @@ from typing import List, Dict
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
-    QHeaderView, QFileDialog
+    QHeaderView, QFileDialog, QProgressBar
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -82,6 +82,18 @@ class HouseholdManagerDialog(QDialog):
             QTableWidget.SelectionMode.SingleSelection
         )
         main_layout.addWidget(self.household_table)
+        
+        # 進度條（初始隱藏）
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        main_layout.addWidget(self.progress_bar)
+        
+        # 進度標籤
+        self.progress_label = QLabel("")
+        self.progress_label.setVisible(False)
+        main_layout.addWidget(self.progress_label)
         
         # 按鈕區域
         button_layout = QHBoxLayout()
@@ -181,6 +193,28 @@ class HouseholdManagerDialog(QDialog):
         except (ValueError, TypeError):
             return 0.0
     
+    def show_progress(self, current: int, total: int, message: str = ""):
+        """顯示進度條"""
+        self.progress_bar.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(current)
+        
+        percentage = int((current / total) * 100) if total > 0 else 0
+        label_text = f"處理中: {current}/{total} ({percentage}%)"
+        if message:
+            label_text += f" - {message}"
+        self.progress_label.setText(label_text)
+        
+        # 強制重繪
+        self.progress_bar.update()
+        self.progress_label.update()
+    
+    def hide_progress(self):
+        """隱藏進度條"""
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+    
     def import_households(self):
         """從 .xlsx/.csv 文件導入住戶"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -201,13 +235,23 @@ class HouseholdManagerDialog(QDialog):
             
             if not households:
                 QMessageBox.warning(self, "警告", "文件中沒有有效的住戶數據")
+                self.hide_progress()
                 return
             
-            # 導入住戶
+            # 導入住戶 - 顯示進度條
             success = 0
             failed = 0
+            total = len(households)
             
-            for household in households:
+            for idx, household in enumerate(households):
+                # 更新進度
+                self.show_progress(idx + 1, total, household['household_id'])
+                
+                # 處理事件（更新 UI）
+                import time
+                from PyQt6.QtWidgets import QApplication
+                QApplication.processEvents()
+                
                 household_id = household['household_id'].strip()
                 name = household['name'].strip()
                 share_amount = household.get('share_amount', 0.0)
@@ -227,6 +271,8 @@ class HouseholdManagerDialog(QDialog):
                 else:
                     failed += 1
             
+            self.hide_progress()
+            
             QMessageBox.information(
                 self, "導入完成",
                 f"成功導入 {success} 個住戶\n"
@@ -237,13 +283,14 @@ class HouseholdManagerDialog(QDialog):
             self.search_input.clear()
             
         except Exception as e:
+            self.hide_progress()
             QMessageBox.critical(self, "錯誤", f"導入失敗: {str(e)}")
     
     def _read_csv_file(self, file_path: str) -> List[Dict]:
         """
         讀取 CSV 文件
         
-        期望的列：戶號 | 戶名 | 面積（坪）
+        期��的列：戶號 | 戶名 | 面積（坪）
         或任何包含這些關鍵字的列名
         """
         households = []
