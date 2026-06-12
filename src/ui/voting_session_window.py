@@ -66,7 +66,7 @@ class VotingSessionWindow(QWidget):
         self.vote_group = QButtonGroup()
         
         self.radio_agree = QRadioButton("✓ 贊成")
-        self.radio_disagree = QRadioButton("✗ 反對")
+        self.radio_disagree = QRadioButton("✗ 不同意")
         self.radio_abstain = QRadioButton("~ 棄權")
         
         self.vote_group.addButton(self.radio_agree, 0)
@@ -79,7 +79,15 @@ class VotingSessionWindow(QWidget):
         
         # 設置投票選項文字為白色
         for radio in [self.radio_agree, self.radio_disagree, self.radio_abstain]:
-            radio.setStyleSheet("color: white;")
+            radio.setStyleSheet("""
+                QRadioButton {
+                    color: white;
+                }
+                QRadioButton::indicator {
+                    width: 18px;
+                    height: 18px;
+                }
+            """)
         
         self.radio_agree.clicked.connect(lambda: self.set_vote_option('同意'))
         self.radio_disagree.clicked.connect(lambda: self.set_vote_option('不同意'))
