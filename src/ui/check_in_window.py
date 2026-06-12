@@ -1,6 +1,7 @@
 """
 報到窗口 - 移除原始條碼欄位，添加進度條和統計圖表（使用 Matplotlib）
 支持中文字體顯示
+支持面積(坪)統計和占比顯示
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -48,7 +49,7 @@ setup_chinese_font()
 
 
 class CheckInWindow(QWidget):
-    """報到窗口 - 支持進度顯示和圖表統計"""
+    """報到窗口 - 支持進度顯示、圖表統計和面積(坪)統計"""
     
     def __init__(self, parent=None):
         """初始化報到窗口"""
@@ -65,13 +66,37 @@ class CheckInWindow(QWidget):
         # ========== 左側布局 ==========
         left_layout = QVBoxLayout()
         
-        # 標題
+        # 標題和統計信息的組合
+        top_layout = QHBoxLayout()
+        
+        # 左部分：標題
         title = QLabel("報到管理")
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
-        left_layout.addWidget(title)
+        top_layout.addWidget(title)
+        
+        top_layout.addStretch()
+        
+        # 右部分：面積統計信息（右上方）
+        area_stats_layout = QVBoxLayout()
+        area_stats_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.total_area_label = QLabel("總坪數: 0 坪")
+        self.total_area_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #1976D2;")
+        area_stats_layout.addWidget(self.total_area_label)
+        
+        self.checked_area_label = QLabel("已報到坪數: 0 坪")
+        self.checked_area_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #4CAF50;")
+        area_stats_layout.addWidget(self.checked_area_label)
+        
+        self.area_percentage_label = QLabel("坪數占比: 0%")
+        self.area_percentage_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #FF9800;")
+        area_stats_layout.addWidget(self.area_percentage_label)
+        
+        top_layout.addLayout(area_stats_layout)
+        left_layout.addLayout(top_layout)
         
         # 統計信息
         stats_layout = QHBoxLayout()
@@ -113,20 +138,23 @@ class CheckInWindow(QWidget):
         
         left_layout.addLayout(scan_layout)
         
-        # 報到記錄表 - 移除原始條碼欄位
+        # 報到記錄表 - 新增面積(坪)欄位
         self.check_in_table = QTableWidget()
-        self.check_in_table.setColumnCount(3)
+        self.check_in_table.setColumnCount(4)
         self.check_in_table.setHorizontalHeaderLabels(
-            ["戶號", "報到時間", "狀態"]
+            ["戶號", "面積(坪)", "報到時間", "狀態"]
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.Stretch
+            1, QHeaderView.ResizeMode.ResizeToContents
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             2, QHeaderView.ResizeMode.Stretch
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Stretch
         )
         left_layout.addWidget(self.check_in_table)
         
@@ -303,7 +331,7 @@ class CheckInWindow(QWidget):
         return result is not None
     
     def refresh_check_in_list(self):
-        """刷新報到列表和圖表"""
+        """刷新報到列表、圖表和面積統計"""
         # 更新統計信息
         stats = self.db.get_check_in_stats()
         if stats:
@@ -325,15 +353,26 @@ class CheckInWindow(QWidget):
             not_checked_in = total - checked_in
             self.create_pie_chart(checked_in, not_checked_in)
         
+        # 計算面積統計
+        area_stats = self.db.get_check_in_area_stats()
+        if area_stats:
+            total_area = area_stats.get('total_area', 0)
+            checked_in_area = area_stats.get('checked_in_area', 0)
+            area_percentage = area_stats.get('area_percentage', 0)
+            
+            self.total_area_label.setText(f"總坪數: {total_area:.2f} 坪")
+            self.checked_area_label.setText(f"已報到坪數: {checked_in_area:.2f} 坪")
+            self.area_percentage_label.setText(f"坪數占比: {area_percentage:.2f}%")
+        
         # 更新表格
         self.check_in_table.setRowCount(0)
         
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
-        # 查詢所有住戶及其報到信息
+        # 查詢所有住戶及其報到信息和面積
         cursor.execute("""
-            SELECT h.household_id, c.checked_in_at
+            SELECT h.household_id, h.share_amount, c.checked_in_at
             FROM households h
             LEFT JOIN check_in_records c ON h.household_id = c.household_id
             ORDER BY h.household_id
@@ -350,34 +389,41 @@ class CheckInWindow(QWidget):
             self.check_in_table.insertRow(row_position)
             
             household_id = row[0]
+            share_amount = row[1] if row[1] else 0  # 面積(坪)
             
             # 戶號
             household_id_item = QTableWidgetItem(household_id)
             
+            # 面積(坪)
+            area_item = QTableWidgetItem(f"{share_amount:.2f}")
+            area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            
             # 報到時間 - 只顯示時間部分 (HH:MM:SS)
-            if row[1]:
+            if row[2]:
                 try:
-                    checked_in_at = row[1].split(' ')[1] if ' ' in row[1] else row[1]
+                    checked_in_at = row[2].split(' ')[1] if ' ' in row[2] else row[2]
                 except:
-                    checked_in_at = row[1]
+                    checked_in_at = row[2]
             else:
                 checked_in_at = ""
             
             time_item = QTableWidgetItem(checked_in_at)
             
             # 狀態 - 已報到 或 尚未報到
-            status = "✓ 已報到" if row[1] else "⊗ 尚未報到"
+            status = "✓ 已報到" if row[2] else "⊗ 尚未報到"
             status_item = QTableWidgetItem(status)
             
             # 如果是最後一筆報到資料，設置黃色背景
             if household_id == self.last_checked_in_household_id:
                 household_id_item.setBackground(yellow_brush)
+                area_item.setBackground(yellow_brush)
                 time_item.setBackground(yellow_brush)
                 status_item.setBackground(yellow_brush)
             
             self.check_in_table.setItem(row_position, 0, household_id_item)
-            self.check_in_table.setItem(row_position, 1, time_item)
-            self.check_in_table.setItem(row_position, 2, status_item)
+            self.check_in_table.setItem(row_position, 1, area_item)
+            self.check_in_table.setItem(row_position, 2, time_item)
+            self.check_in_table.setItem(row_position, 3, status_item)
     
     def export_check_in_data(self):
         """導出報到數據"""
