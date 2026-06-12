@@ -69,12 +69,13 @@ class CheckInWindow(QWidget):
         # 標題和統計信息的組合
         top_layout = QHBoxLayout()
         
-        # 左部分：標題
+        # 左部分：標題（白色字）
         title = QLabel("報到管理")
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
+        title.setStyleSheet("color: white;")
         top_layout.addWidget(title)
         
         top_layout.addStretch()
@@ -184,6 +185,7 @@ class CheckInWindow(QWidget):
         chart_title_font.setPointSize(12)
         chart_title_font.setBold(True)
         chart_title.setFont(chart_title_font)
+        chart_title.setStyleSheet("color: white;")
         right_layout.addWidget(chart_title)
         
         # 建立 Matplotlib 圖表
