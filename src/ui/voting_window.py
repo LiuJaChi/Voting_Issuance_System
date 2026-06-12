@@ -170,19 +170,42 @@ class VotingWindow(QWidget):
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
-        # ═══════════════════════════ 5. 已投票住戶列表 ═══════════════════════════
+        # ═══════════════════════════ 5. 已投票住戶列表 (新樣式：橫向標籤) ═══════════════════════════
         voted_group = QGroupBox("5️⃣ 已投票住戶列表")
         voted_layout = QVBoxLayout()
         
-        self.voted_table = QTableWidget()
-        self.voted_table.setColumnCount(3)
-        self.voted_table.setHorizontalHeaderLabels(["戶號", "投票選項", "時間"])
-        self.voted_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.voted_table.setMaximumHeight(150)
-        voted_layout.addWidget(self.voted_table)
+        # 建立可滾動區域
+        self.voted_scroll_area = QScrollArea()
+        self.voted_scroll_area.setWidgetResizable(True)
+        self.voted_scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #DDD;
+                background-color: #F9F9F9;
+                border-radius: 4px;
+            }
+            QScrollBar:horizontal {
+                height: 8px;
+            }
+            QScrollBar::handle:horizontal {
+                background-color: #2196F3;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background-color: #1976D2;
+            }
+        """)
         
+        # 建立水平佈局容器
+        self.voted_container = QWidget()
+        self.voted_labels_layout = QHBoxLayout(self.voted_container)
+        self.voted_labels_layout.setContentsMargins(10, 10, 10, 10)
+        self.voted_labels_layout.setSpacing(8)
+        self.voted_labels_layout.addStretch()
+        
+        self.voted_scroll_area.setWidget(self.voted_container)
+        self.voted_scroll_area.setMaximumHeight(100)
+        
+        voted_layout.addWidget(self.voted_scroll_area)
         voted_group.setLayout(voted_layout)
         main_layout.addWidget(voted_group)
         
@@ -470,9 +493,13 @@ class VotingWindow(QWidget):
             print(f"更新進度條失敗: {e}")
     
     def refresh_voted_list(self):
-        """刷新已投票住戶列表"""
+        """刷新已投票住戶列表 - 橫向標籤樣式"""
         try:
-            self.voted_table.setRowCount(0)
+            # 清空現有標籤
+            while self.voted_labels_layout.count() > 1:
+                widget = self.voted_labels_layout.takeAt(0).widget()
+                if widget:
+                    widget.deleteLater()
             
             if not self.voting_items or self.current_case_idx >= len(self.voting_items):
                 return
@@ -484,7 +511,7 @@ class VotingWindow(QWidget):
             conn = self.db.get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT v.household_id, v.vote, v.voted_at
+                SELECT v.household_id, v.vote
                 FROM votes v
                 WHERE v.case_number = ?
                 ORDER BY v.voted_at DESC
@@ -493,30 +520,41 @@ class VotingWindow(QWidget):
             votes = cursor.fetchall()
             conn.close()
             
-            for row_idx, vote in enumerate(votes):
-                self.voted_table.insertRow(row_idx)
-                
-                household_id_item = QTableWidgetItem(vote['household_id'])
-                household_id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                
+            # 定義投票選項顏色對應
+            vote_colors = {
+                '同意': QColor(144, 238, 144),      # 淡綠色 #90EE90
+                '不同意': QColor(255, 160, 122),    # 淡紅色 #FFA07A
+                '棄權': QColor(255, 255, 0)         # 淡黃色 #FFFF00
+            }
+            
+            # 為每個已投票戶號創建標籤
+            for vote in votes:
+                household_id = vote['household_id']
                 vote_option = vote['vote']
-                vote_item = QTableWidgetItem(vote_option)
-                vote_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                vote_item.setForeground(QColor("black"))
                 
-                # 根據投票選項著色
-                if vote_option == "同意":
-                    vote_item.setBackground(QColor("#C8E6C9"))
-                elif vote_option == "不同意":
-                    vote_item.setBackground(QColor("#FFCDD2"))
-                elif vote_option == "棄權":
-                    vote_item.setBackground(QColor("#FFF9C4"))
+                # 創建標籤
+                label = QLabel(household_id)
+                label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 
-                time_item = QTableWidgetItem(str(vote['voted_at'])[:19])
+                # 獲取背景色
+                bg_color = vote_colors.get(vote_option, QColor(200, 200, 200))
                 
-                self.voted_table.setItem(row_idx, 0, household_id_item)
-                self.voted_table.setItem(row_idx, 1, vote_item)
-                self.voted_table.setItem(row_idx, 2, time_item)
+                # 設置樣式：圓角、邊框、背景色
+                label.setStyleSheet(f"""
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    background-color: {bg_color.name()};
+                    color: black;
+                    font-weight: bold;
+                    min-width: 70px;
+                    border: 2px solid {bg_color.darker(150).name()};
+                """)
+                
+                # 添加到布局（在 stretch 之前）
+                self.voted_labels_layout.insertWidget(
+                    self.voted_labels_layout.count() - 1, label
+                )
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
