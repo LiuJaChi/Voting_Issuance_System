@@ -9,8 +9,10 @@
 - 條碼映射（household_id, barcode_data）
 """
 import sqlite3
-from typing import List, Dict, Optional, Tuple
+import json
 from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 
 
 class Database:
@@ -19,6 +21,7 @@ class Database:
     def __init__(self, db_path: str = "data/votes.db"):
         """初始化數據庫連接"""
         self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
     def get_connection(self):
@@ -181,10 +184,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            # 先刪除該戶號的舊映射（如果存在）
             cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
-
-            # 插入新映射
             cursor.execute("""
                 INSERT INTO barcode_mapping (household_id, barcode_data)
                 VALUES (?, ?)
@@ -249,11 +249,10 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            # 使用電腦當前系統時間，而不是數據庫服務器時間
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
+            
             print(f"📝 報到時間: {current_time} (戶號: {household_id})")
-
+            
             cursor.execute("""
                 INSERT INTO check_in_records (household_id, checked_in_at, device_id)
                 VALUES (?, ?, ?)
@@ -287,9 +286,9 @@ class Database:
 
     # ─────────────────────────── 投票項目管理 ───────────────────────────
 
-    def add_voting_item(self, case_number: str, name: str, description: str = "",
-                        vote_type: str = "一般議案", pass_percentage: float = 66.7) -> bool:
-        """添加投票項目"""
+    def add_voting_item(self, case_number: str, name: str, description: str = None,
+                       vote_type: str = '一般議案', pass_percentage: float = 66.7) -> bool:
+        """新增投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -304,8 +303,8 @@ class Database:
             conn.close()
             return False
 
-    def update_voting_item(self, case_number: str, name: str, description: str = "",
-                          vote_type: str = "一般議案", pass_percentage: float = 66.7) -> bool:
+    def update_voting_item(self, case_number: str, name: str, description: str,
+                          vote_type: str, pass_percentage: float) -> bool:
         """更新投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -467,19 +466,11 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
 
-        # 初始化所有三個投票選項為 0
         result = {
             'case_number': case_number,
             'item_name': item['name'],
-            'vote_type': item['vote_type'],
-            'pass_percentage': item['pass_percentage'],
-            'votes': {
-                '同意': 0,
-                '不同意': 0,
-                '棄權': 0
-            }
+            'votes': {}
         }
-
         total = 0
         for row in rows:
             result['votes'][row['vote']] = row['count']
@@ -492,6 +483,100 @@ class Database:
         """獲取所有投票項目的結果"""
         items = self.get_all_voting_items()
         return [self.get_voting_results(item['case_number']) for item in items]
+
+    # ─────────────────────────── 數據導出 ───────────────────────────
+
+    def export_data(self, export_path: str = "exports/data.json") -> bool:
+        """導出所有數據到 JSON 文件"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 獲取所有表的數據
+            cursor.execute("SELECT * FROM households")
+            households = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM check_in_records")
+            check_in_records = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM barcode_mapping")
+            barcode_mappings = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM voting_items")
+            voting_items = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM votes")
+            votes = [dict(row) for row in cursor.fetchall()]
+
+            conn.close()
+
+            # 構建導出數據
+            export_data = {
+                'households': households,
+                'check_in_records': check_in_records,
+                'barcode_mappings': barcode_mappings,
+                'voting_items': voting_items,
+                'votes': votes,
+                'exported_at': datetime.now().isoformat()
+            }
+
+            # 創建導出目錄
+            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
+
+            # 寫入 JSON 文件
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
+
+            print(f"✓ 數據已導出到: {export_path}")
+            return True
+        except Exception as e:
+            print(f"✗ 數據導出失敗: {e}")
+            return False
+
+    # ─────────────────────────── 數據清空 ───────────────────────────
+
+    def clear_all_data(self) -> bool:
+        """清空所有數據（所有表）"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 刪除所有表中的數據
+            cursor.execute("DELETE FROM votes")
+            cursor.execute("DELETE FROM check_in_records")
+            cursor.execute("DELETE FROM barcode_mapping")
+            cursor.execute("DELETE FROM voting_items")
+            cursor.execute("DELETE FROM households")
+
+            conn.commit()
+            conn.close()
+
+            print("✓ 所有數據已清空")
+            return True
+        except Exception as e:
+            print(f"✗ 清空數據失敗: {e}")
+            return False
+
+    def clear_household_data(self) -> bool:
+        """清空住戶及相關數據（保留投票項目）"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 只刪除與住戶相關的數據
+            cursor.execute("DELETE FROM votes")
+            cursor.execute("DELETE FROM check_in_records")
+            cursor.execute("DELETE FROM barcode_mapping")
+            cursor.execute("DELETE FROM households")
+
+            conn.commit()
+            conn.close()
+
+            print("✓ 住戶數據已清空")
+            return True
+        except Exception as e:
+            print(f"✗ 清空住戶數據失敗: {e}")
+            return False
 
     # ─────────────────────────── 向後兼容 ───────────────────────────
 
