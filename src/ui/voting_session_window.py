@@ -5,7 +5,7 @@
 1. 選擇投票選項（贊成/反對/棄權）
 2. 掃描條碼投票
 3. 實時統計投票結果
-4. 分類顯示所有已報到住戶，投票完成後根據選項給予顏色
+4. 分類顯示投票明細
 5. 多案號投票切換
 """
 from PyQt6.QtWidgets import (
@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QRadioButton, QButtonGroup, QProgressBar
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QPalette
 from datetime import datetime
 
 from src.backend.database import Database
@@ -32,7 +32,7 @@ class VotingSessionWindow(QWidget):
         self.current_case_idx = 0  # 當前投票案號索引
         self.voting_cases = []  # 所有投票案號
         self.selected_vote = None  # 選中的投票選項
-        self.all_households = []  # 所有已報到住戶
+        self.voted_households = {}  # 已投票戶號集合
         
         self.init_ui()
         self.load_voting_cases()
@@ -66,7 +66,7 @@ class VotingSessionWindow(QWidget):
         self.vote_group = QButtonGroup()
         
         self.radio_agree = QRadioButton("✓ 贊成")
-        self.radio_disagree = QRadioButton("✗ 不同意")
+        self.radio_disagree = QRadioButton("✗ 反對")
         self.radio_abstain = QRadioButton("~ 棄權")
         
         self.vote_group.addButton(self.radio_agree, 0)
@@ -77,21 +77,37 @@ class VotingSessionWindow(QWidget):
         self.radio_disagree.setFont(QFont('Arial', 11))
         self.radio_abstain.setFont(QFont('Arial', 11))
         
-        # 設置投票選項文字為白色
+        self.radio_agree.clicked.connect(lambda: self.set_vote_option('同意'))
+        self.radio_disagree.clicked.connect(lambda: self.set_vote_option('不同意'))
+        self.radio_abstain.clicked.connect(lambda: self.set_vote_option('棄權'))
+        
+        # 設置投票選項文字為白色 - 使用 QPalette + StyleSheet 組合
         for radio in [self.radio_agree, self.radio_disagree, self.radio_abstain]:
+            # 方法1：使用調色板設置文字顏色（優先級高）
+            palette = radio.palette()
+            palette.setColor(QPalette.ColorRole.WindowText, QColor("white"))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor("white"))
+            radio.setPalette(palette)
+            
+            # 方法2：使用樣式表進行微調
             radio.setStyleSheet("""
                 QRadioButton {
+                    color: white;
+                    font-weight: bold;
+                    background-color: transparent;
+                }
+                QRadioButton:hover {
+                    color: white;
+                }
+                QRadioButton:pressed {
                     color: white;
                 }
                 QRadioButton::indicator {
                     width: 18px;
                     height: 18px;
+                    margin-right: 5px;
                 }
             """)
-        
-        self.radio_agree.clicked.connect(lambda: self.set_vote_option('同意'))
-        self.radio_disagree.clicked.connect(lambda: self.set_vote_option('不同意'))
-        self.radio_abstain.clicked.connect(lambda: self.set_vote_option('棄權'))
         
         left_layout.addWidget(self.radio_agree)
         left_layout.addWidget(self.radio_disagree)
@@ -128,19 +144,25 @@ class VotingSessionWindow(QWidget):
         
         left_layout.addSpacing(15)
         
-        # 已報到住戶列表標題
-        household_label = QLabel("已報到住戶列表:")
-        household_label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
-        left_layout.addWidget(household_label)
+        # 已投戶號列表標題
+        voted_label = QLabel("已投戶號列表:")
+        voted_label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+        left_layout.addWidget(voted_label)
         
-        # 已報到住戶表格 - 只顯示戶號
-        self.household_table = QTableWidget()
-        self.household_table.setColumnCount(1)
-        self.household_table.setHorizontalHeaderLabels(["戶號"])
-        self.household_table.horizontalHeader().setSectionResizeMode(
+        # 已投戶號表格
+        self.voted_table = QTableWidget()
+        self.voted_table.setColumnCount(3)
+        self.voted_table.setHorizontalHeaderLabels(["戶號", "選項", "時間"])
+        self.voted_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        left_layout.addWidget(self.household_table)
+        self.voted_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.voted_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        left_layout.addWidget(self.voted_table)
         
         # ========== 右側：投票統計面板 ==========
         right_layout = QVBoxLayout()
@@ -220,31 +242,12 @@ class VotingSessionWindow(QWidget):
     def load_voting_cases(self):
         """載入所有投票案號"""
         self.voting_cases = self.db.get_all_voting_items()
-        
-        # 載入所有已報到住戶
-        self.load_households()
+        self.voted_households = {}
         
         if self.voting_cases:
             self.update_case_display()
         else:
             QMessageBox.warning(self, "警告", "沒有投票案號，請先添加投票項目")
-    
-    def load_households(self):
-        """載入所有已報到住戶"""
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-        
-        # 查詢所有已報到的住戶
-        cursor.execute("""
-            SELECT DISTINCT h.household_id FROM households h
-            JOIN check_in_records c ON h.household_id = c.household_id
-            ORDER BY h.household_id
-        """)
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        self.all_households = [row[0] for row in rows]
     
     def update_case_display(self):
         """更新當前案號顯示"""
@@ -269,8 +272,8 @@ class VotingSessionWindow(QWidget):
         self.barcode_input.clear()
         self.barcode_input.setFocus()
         
-        # 更新住戶列表（根據投票狀態著色）
-        self.refresh_household_list()
+        # 更新已投戶號列表
+        self.refresh_voted_list()
         
         # 更新統計信息
         self.refresh_voting_stats()
@@ -305,13 +308,6 @@ class VotingSessionWindow(QWidget):
             self.barcode_input.setFocus()
             return
         
-        # 檢查住戶是否已報到
-        if household_id not in self.all_households:
-            QMessageBox.critical(self, "錯誤", f"戶號 {household_id} 未報到")
-            self.barcode_input.clear()
-            self.barcode_input.setFocus()
-            return
-        
         # 檢查是否已投票
         case = self.voting_cases[self.current_case_idx]
         if self.db.has_voted(household_id, case['case_number']):
@@ -333,53 +329,65 @@ class VotingSessionWindow(QWidget):
             # 清空輸入框並更新統計
             self.barcode_input.clear()
             self.barcode_input.setFocus()
-            self.refresh_household_list()
+            self.refresh_voted_list()
             self.refresh_voting_stats()
         else:
             QMessageBox.critical(self, "錯誤", "投票記錄失敗")
             self.barcode_input.clear()
             self.barcode_input.setFocus()
     
-    def refresh_household_list(self):
-        """刷新住戶列表 - 根據投票狀態著色"""
+    def refresh_voted_list(self):
+        """刷新已投戶號列表"""
         if not self.voting_cases:
             return
         
         case = self.voting_cases[self.current_case_idx]
-        self.household_table.setRowCount(0)
+        self.voted_table.setRowCount(0)
         
-        # 查詢該案號的投票記錄
         conn = self.db.get_connection()
         cursor = conn.cursor()
         
+        # 查詢該案號的所有投票記錄
         cursor.execute("""
-            SELECT household_id, vote FROM votes WHERE case_number = ?
+            SELECT h.household_id, h.name, v.vote, v.voted_at
+            FROM votes v
+            JOIN households h ON v.household_id = h.household_id
+            WHERE v.case_number = ?
+            ORDER BY v.voted_at DESC
         """, (case['case_number'],))
         
-        voted_dict = {}
-        for row in cursor.fetchall():
-            voted_dict[row[0]] = row[1]
-        
+        rows = cursor.fetchall()
         conn.close()
         
-        # 顯示所有已報到住戶
-        for row_idx, household_id in enumerate(self.all_households):
-            self.household_table.insertRow(row_idx)
+        for row_idx, row in enumerate(rows):
+            self.voted_table.insertRow(row_idx)
             
-            item = QTableWidgetItem(household_id)
+            household_id = row[0]
+            vote_option = row[2]
+            voted_at = row[3]
             
-            # 根據投票狀態著色
-            if household_id in voted_dict:
-                vote = voted_dict[household_id]
-                if vote == '同意':
-                    item.setBackground(QColor(144, 238, 144))  # 淡綠色
-                elif vote == '不同意':
-                    item.setBackground(QColor(255, 160, 122))  # 淡紅色
-                else:  # 棄權
-                    item.setBackground(QColor(255, 255, 200))  # 淡黃色
-            # 未投票時無背景顏色
+            # 戶號
+            household_item = QTableWidgetItem(household_id)
             
-            self.household_table.setItem(row_idx, 0, item)
+            # 投票選項 - 設置顏色
+            vote_item = QTableWidgetItem(vote_option)
+            if vote_option == '同意':
+                vote_item.setBackground(QColor(144, 238, 144))  # 淡綠色
+            elif vote_option == '不同意':
+                vote_item.setBackground(QColor(255, 160, 122))  # 淡紅色
+            else:  # 棄權
+                vote_item.setBackground(QColor(255, 255, 200))  # 淡黃色
+            
+            # 投票時間 - 只顯示時間部分
+            try:
+                time_str = voted_at.split(' ')[1] if ' ' in voted_at else voted_at
+            except:
+                time_str = voted_at
+            time_item = QTableWidgetItem(time_str)
+            
+            self.voted_table.setItem(row_idx, 0, household_item)
+            self.voted_table.setItem(row_idx, 1, vote_item)
+            self.voted_table.setItem(row_idx, 2, time_item)
     
     def refresh_voting_stats(self):
         """刷新投票統計"""
@@ -388,8 +396,9 @@ class VotingSessionWindow(QWidget):
         
         case = self.voting_cases[self.current_case_idx]
         
-        # 已報到人數
-        total_attendees = len(self.all_households)
+        # 獲取出席人數
+        checked_in_stats = self.db.get_check_in_stats()
+        total_attendees = checked_in_stats['checked_in']
         
         # 獲取投票結果
         voting_result = self.db.get_voting_results(case['case_number'])
@@ -488,6 +497,6 @@ class VotingSessionWindow(QWidget):
             conn.commit()
             conn.close()
             
-            self.refresh_household_list()
+            self.refresh_voted_list()
             self.refresh_voting_stats()
             QMessageBox.information(self, "成功", "本案投票記錄已清空")
