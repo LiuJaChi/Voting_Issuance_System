@@ -180,7 +180,7 @@ class Database:
                 failed += 1
         return success, failed
 
-    # ─────────────────────────── 條碼映射管理 ───────────────────────────
+    # ─────────────────────────── 條碼映射管理 ───���───────────────────────
 
     def add_barcode_mapping(self, household_id: str, barcode_data: str) -> bool:
         """添加戶號-條碼映射"""
@@ -568,6 +568,23 @@ class Database:
 
         conn.close()
         return result
+
+    def get_voting_area_by_vote(self, case_number: str, vote_option: str) -> float:
+        """獲取某案號某投票選項的坪數總和"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT COALESCE(SUM(h.share_amount), 0) as area
+            FROM votes v
+            JOIN households h ON v.household_id = h.household_id
+            WHERE v.case_number = ? AND v.vote = ?
+        """, (case_number, vote_option))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        return row['area'] if row else 0.0
 
     def get_all_voting_results(self) -> List[Dict]:
         """獲取所有投票項目的結果"""
