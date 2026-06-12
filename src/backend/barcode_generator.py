@@ -1,5 +1,5 @@
 """
-條碼生成模塊 - 使用 python-barcode 生成 Code39 條碼
+條碼生成模塊 - 使用 python-barcode 生成 Code128 條碼
 """
 import barcode
 from barcode.writer import ImageWriter
@@ -9,7 +9,7 @@ import os
 
 
 class BarcodeGenerator:
-    """使用 python-barcode 生成 Code39 條碼"""
+    """使用 python-barcode 生成 Code128 條碼"""
 
     def __init__(self, output_dir: str = "exports/barcodes"):
         """初始化條碼生成器"""
@@ -20,10 +20,10 @@ class BarcodeGenerator:
 
     def generate_barcode_image(self, barcode_data: str, filename: str = None, show_original_text: bool = True) -> str:
         """
-        生成單個條碼圖片（PNG 格式）- 使用 Code39
+        生成單個條碼圖片（PNG 格式）- 使用 Code128
 
         Args:
-            barcode_data: 條碼數據（例如：06-02F）
+            barcode_data: 條碼數據（例如：A106-02）
             filename: 輸出文件名（不含副檔名）
             show_original_text: 是否在圖片底部顯示原始文字
 
@@ -37,16 +37,17 @@ class BarcodeGenerator:
         filepath = os.path.join(self.output_dir, filename)
         
         try:
-            # 使用 Code39 格式直接編碼戶號
-            code39_class = barcode.get_barcode_class('code39')
-            bar = code39_class(barcode_data, writer=ImageWriter(), add_checksum=False)
+            # 使用 Code128 格式直接編碼戶號
+            code128_class = barcode.get_barcode_class('code128')
+            bar = code128_class(barcode_data, writer=ImageWriter(), add_checksum=False)
             
             # 設置條碼選項
             options = {
-                'module_width': 0.5,      # 條碼寬度
+                'module_width': 0.75,     # 條碼寬度（增加以提高清晰度）
                 'module_height': 15.0,    # 條碼高度
-                'font_size': 14,          # 文字大小
+                'font_size': 12,          # 文字大小
                 'text_distance': 5,       # 文字與條碼距離
+                'quiet_zone': 3.0,        # 靜區寬度
             }
             
             bar.save(filepath, options=options)
@@ -56,7 +57,7 @@ class BarcodeGenerator:
             
             return f"{filepath}.png"
         except Exception as e:
-            print(f"條碼生成失敗 {barcode_data}: {e}")
+            print(f"Code128 條碼生成失敗 {barcode_data}: {e}")
             raise
 
     def generate_household_barcode(self, household_id: str, show_text: bool = True) -> str:
@@ -64,7 +65,7 @@ class BarcodeGenerator:
         為住戶（戶號）生成報到條碼
 
         Args:
-            household_id: 戶號，例如 06-02F
+            household_id: 戶號，例如 A106-02
             show_text: 是否顯示戶號文字
 
         Returns:
@@ -79,7 +80,7 @@ class BarcodeGenerator:
         生成投票單條碼（戶號+案號）
 
         Args:
-            household_id: 戶號，例如 06-02F
+            household_id: 戶號，例如 A106-02
             case_number: 案號，例如 001
             show_text: 是否顯示文字
 
@@ -102,7 +103,7 @@ class BarcodeGenerator:
         解析投票單條碼，返回 (household_id, case_number) 或 None
 
         投票單條碼格式：{household_id}_{case_number}
-        例如：06-02F_001
+        例如：A106-02_001
         """
         if "_" not in barcode_content:
             return None
@@ -131,7 +132,7 @@ class BarcodeGenerator:
                 path = self.generate_barcode_image(barcode_data, show_text=show_text)
                 paths.append(path)
             except Exception as e:
-                print(f"條碼生成失敗 {barcode_data}: {e}")
+                print(f"Code128 條碼生成失敗 {barcode_data}: {e}")
         return paths
 
     def generate_household_barcodes_batch(
@@ -153,7 +154,7 @@ class BarcodeGenerator:
                 path = self.generate_household_barcode(household_id, show_text)
                 paths.append(path)
             except Exception as e:
-                print(f"條碼生成失敗 {household_id}: {e}")
+                print(f"Code128 條碼生成失敗 {household_id}: {e}")
         return paths
 
     def generate_barcodes(self, household_ids: List[str]) -> List[str]:
@@ -179,15 +180,15 @@ if __name__ == "__main__":
     
     # 測試報到條碼
     print("生成報到條碼...")
-    checkin_barcode = generator.generate_household_barcode("06-03F", show_text=True)
+    checkin_barcode = generator.generate_household_barcode("A106-02", show_text=True)
     print(f"報到條碼: {checkin_barcode}")
     
     # 測試投票單條碼
     print("\n生成投票單條碼...")
-    ballot_barcode = generator.generate_voting_ballot_barcode("06-03F", "001", show_text=True)
+    ballot_barcode = generator.generate_voting_ballot_barcode("A106-02", "001", show_text=True)
     print(f"投票單條碼: {ballot_barcode}")
     
     # 測試條碼解析
     print("\n測試條碼解析...")
-    result = BarcodeGenerator.parse_ballot_barcode("06-03F_001")
+    result = BarcodeGenerator.parse_ballot_barcode("A106-02_001")
     print(f"解析結果: {result}")
