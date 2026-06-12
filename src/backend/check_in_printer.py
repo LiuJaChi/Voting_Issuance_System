@@ -8,7 +8,7 @@
 - 內容：戶號（上方） + 條碼圖像（下方）
 """
 import os
-import tempfile
+import shutil
 from pathlib import Path
 from typing import List, Dict
 
@@ -40,23 +40,25 @@ class CheckInPrinter:
         """初始化"""
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
-        self.temp_barcodes = []  # 存儲臨時條碼文件路徑
+        
+        # 建立臨時條碼目錄（用於存儲 PDF 生成過程中的條碼）
+        self.temp_barcode_dir = os.path.join(output_dir, ".temp_barcodes")
+        Path(self.temp_barcode_dir).mkdir(parents=True, exist_ok=True)
 
-    def _cleanup_temp_files(self):
-        """清理臨時條碼文件"""
-        for temp_path in self.temp_barcodes:
-            try:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-            except Exception as e:
-                print(f"清理臨時文件失敗 {temp_path}: {e}")
-        self.temp_barcodes = []
+    def _cleanup_temp_barcode_dir(self):
+        """清理臨時條碼目錄"""
+        try:
+            if os.path.exists(self.temp_barcode_dir):
+                shutil.rmtree(self.temp_barcode_dir)
+                print(f"✓ 臨時條碼目錄已清理: {self.temp_barcode_dir}")
+        except Exception as e:
+            print(f"清理臨時條碼目錄失敗: {e}")
 
     def _generate_code128_image(self, content: str) -> str:
         """
         生成 Code128 條碼圖片，返回文件路徑
         
-        使用 python-barcode 庫直接生成條碼圖像，保存為臨時文件
+        使用 python-barcode 庫直接生成條碼圖像，保存到臨時目錄
         
         Args:
             content: Code128 內容（例如 A106-02）
@@ -65,16 +67,13 @@ class CheckInPrinter:
             條碼圖像文件路徑
         """
         try:
-            # 建立臨時目錄存放條碼
-            temp_dir = tempfile.gettempdir()
-            
             # 確保內容適合作為文件名
             safe_content = content.replace('/', '_').replace('\\', '_').replace('-', '_')
             temp_filename = f"barcode_{safe_content}"
-            temp_path = os.path.join(temp_dir, temp_filename)
+            temp_path = os.path.join(self.temp_barcode_dir, temp_filename)
             
             print(f"📝 開始生成條碼: {content}")
-            print(f"📂 臨時路徑: {temp_path}")
+            print(f"📂 條碼路徑: {temp_path}")
             
             # 使用 python-barcode 生成 Code128 條碼
             code128_class = barcode.get_barcode_class('code128')
@@ -100,7 +99,6 @@ class CheckInPrinter:
             
             # 驗證文件是否存在
             if os.path.exists(actual_path):
-                self.temp_barcodes.append(actual_path)
                 print(f"✓ Code128 條碼生成成功: {content}")
                 return actual_path
             else:
@@ -215,7 +213,7 @@ class CheckInPrinter:
             table_data.append(row_cells)
 
         if not table_data:
-            self._cleanup_temp_files()
+            self._cleanup_temp_barcode_dir()
             return output_path
 
         col_widths = [cell_w] * COLS_PER_PAGE
@@ -237,7 +235,7 @@ class CheckInPrinter:
         doc.build([table])
         print(f"✓ PDF 生成完成: {output_path}")
         
-        # 清理臨時文件
-        self._cleanup_temp_files()
+        # PDF 已生成完成，現在可以安全地清理臨時條碼文件
+        self._cleanup_temp_barcode_dir()
         
         return output_path
