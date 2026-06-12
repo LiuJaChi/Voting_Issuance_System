@@ -11,7 +11,6 @@ import os
 import tempfile
 from pathlib import Path
 from typing import List, Dict
-from io import BytesIO
 
 import barcode
 from barcode.writer import ImageWriter
@@ -23,7 +22,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import Image as RLImage
 from reportlab.platypus import Spacer
-from PIL import Image as PILImage
 
 
 # 報到單（標籤）尺寸
@@ -71,8 +69,12 @@ class CheckInPrinter:
             temp_dir = tempfile.gettempdir()
             
             # 確保內容適合作為文件名
-            safe_content = content.replace('/', '_').replace('\\', '_')
-            temp_path = os.path.join(temp_dir, f"barcode_{safe_content}")
+            safe_content = content.replace('/', '_').replace('\\', '_').replace('-', '_')
+            temp_filename = f"barcode_{safe_content}"
+            temp_path = os.path.join(temp_dir, temp_filename)
+            
+            print(f"📝 開始生成條碼: {content}")
+            print(f"📂 臨時路徑: {temp_path}")
             
             # 使用 python-barcode 生成 Code128 條碼
             code128_class = barcode.get_barcode_class('code128')
@@ -90,22 +92,31 @@ class CheckInPrinter:
                 'quiet_zone': 3.0,        # 靜區寬度
             }
             
-            # 保存條碼圖像到文件（不包含副檔名，barcode 會自動添加 .png）
-            bar.save(temp_path, options=options)
+            # 保存條碼圖像到文件
+            # barcode.save() 返回完整文件路徑（包含 .png 副檔名）
+            actual_path = bar.save(temp_path, options=options)
             
-            # barcode 庫自動添加 .png 副檔名
-            final_path = temp_path + '.png'
+            print(f"✓ 條碼庫返回路徑: {actual_path}")
             
-            # 記錄臨時文件，用於後續清理
-            if os.path.exists(final_path):
-                self.temp_barcodes.append(final_path)
-                print(f"✓ Code128 條碼生成成功: {content} -> {final_path}")
-                return final_path
+            # 驗證文件是否存在
+            if os.path.exists(actual_path):
+                self.temp_barcodes.append(actual_path)
+                print(f"✓ Code128 條碼生成成功: {content}")
+                return actual_path
             else:
-                raise FileNotFoundError(f"條碼文件未生成: {final_path}")
+                # 嘗試帶 .png 副檔名
+                png_path = temp_path + '.png'
+                if os.path.exists(png_path):
+                    self.temp_barcodes.append(png_path)
+                    print(f"✓ Code128 條碼生成成功 (已添加.png): {content}")
+                    return png_path
+                else:
+                    raise FileNotFoundError(f"條碼文件未生成。預期路徑: {actual_path} 或 {png_path}")
             
         except Exception as e:
             print(f"✗ Code128 條碼生成失敗 {content}: {e}")
+            import traceback
+            traceback.print_exc()
             raise
 
     def generate_pdf(
@@ -162,17 +173,23 @@ class CheckInPrinter:
         table_data = []
         row_cells = []
 
-        for household in households:
+        for idx, household in enumerate(households):
             household_id = household['household_id']
+            print(f"\n🏠 處理住戶 {idx + 1}/{len(households)}: {household_id}")
             
             # 生成 Code128 條碼圖像
             try:
                 code128_path = self._generate_code128_image(household_id)
+                print(f"✓ 條碼路徑已驗證: {code128_path}")
+                
                 # 從文件讀取條碼圖像到 PDF
                 # 調整寬度和高度使條碼更清晰
                 code128_img = RLImage(code128_path, width=cell_w * 0.9, height=14 * mm)
+                print(f"✓ 條碼圖像已載入 PDF")
             except Exception as e:
-                print(f"條碼生成失敗 {household_id}: {e}")
+                print(f"❌ 條碼生成失敗 {household_id}: {e}")
+                import traceback
+                traceback.print_exc()
                 # 如果生成失敗，顯示文字代替
                 code128_img = Paragraph(f"Error: {household_id}", household_id_style)
             
@@ -223,7 +240,9 @@ class CheckInPrinter:
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
 
+        print(f"\n📄 開始生成 PDF: {output_path}")
         doc.build([table])
+        print(f"✓ PDF 生成完成: {output_path}")
         
         # 清理臨時文件
         self._cleanup_temp_files()
