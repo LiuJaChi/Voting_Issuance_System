@@ -2,10 +2,10 @@
 投票單 PDF 生成模塊 - 使用 python-barcode 生成 Code128 條碼圖像
 
 投票單規格：
-- 每張投票單：案號 + 項目名稱 + 描述 + 住戶條碼 + 投票選項
+- 每張投票單：案號 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項
 - 每張大小：約 95mm × 70mm
 - 每頁 A4：2 欄 × 4 列 = 8 張
-- 內容：第X案 + 項目名稱 + 描述 + 住戶條碼 + 投票選項(同意/不同意/棄權)
+- 內容：第X案 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項(同意/不同意/棄權)
 """
 import os
 import shutil
@@ -22,6 +22,8 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.platypus import Image as RLImage
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 
 # 投票單（標籤）尺寸
@@ -44,6 +46,46 @@ class VotingBallotPrinter:
         # 建立臨時條碼目錄（用於存儲 PDF 生成過程中的條碼）
         self.temp_barcode_dir = os.path.join(output_dir, ".temp_barcodes")
         Path(self.temp_barcode_dir).mkdir(parents=True, exist_ok=True)
+        
+        # 初始化繁體中文字體
+        self._init_chinese_fonts()
+
+    def _init_chinese_fonts(self):
+        """初始化繁體中文字體支持"""
+        try:
+            # 常見繁體中文字體路徑
+            font_paths = [
+                # Windows 路徑
+                "C:\\Windows\\Fonts\\msjh.ttc",  # 微軟正黑體
+                "C:\\Windows\\Fonts\\kaiu.ttf",  # 標楷體
+                # macOS 路徑
+                "/Library/Fonts/Kaiti.ttc",
+                "/Library/Fonts/PingFang.ttc",
+                # Linux 路徑
+                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf",
+            ]
+            
+            font_found = False
+            for font_path in font_paths:
+                if os.path.exists(font_path):
+                    try:
+                        # 嘗試註冊字體
+                        font_name = os.path.basename(font_path).replace('.ttc', '').replace('.ttf', '')
+                        pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+                        pdfmetrics.registerFont(TTFont('ChineseFontBold', font_path))
+                        print(f"✓ 繁體中文字體已加載: {font_path}")
+                        font_found = True
+                        break
+                    except Exception as e:
+                        print(f"嘗試加載字體失敗 {font_path}: {e}")
+                        continue
+            
+            if not font_found:
+                print("⚠ 未找到繁體中文字體，將使用默認字體")
+                
+        except Exception as e:
+            print(f"初始化中文字體失敗: {e}")
 
     def _cleanup_temp_barcode_dir(self):
         """清理臨時條碼目錄"""
@@ -112,13 +154,14 @@ class VotingBallotPrinter:
         生成投票單 PDF
         
         投票單格式：
-        第X案 + 項目名稱 + 描述 + 住戶條碼 + 投票選項
+        第X案 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項
         
         Args:
             voting_data: [
                 {
                     'case_number': '1',
                     'name': '物業管理費調整',
+                    'vote_type': '重大議案',
                     'description': '擬調整2026年物業管理費',
                     'households': [
                         {'household_id': 'A106-02', 'name': '洪正平'},
@@ -148,14 +191,24 @@ class VotingBallotPrinter:
 
         styles = getSampleStyleSheet()
         
+        # 檢查中文字體是否可用
+        try:
+            pdfmetrics.getFont('ChineseFont')
+            font_name = 'ChineseFont'
+            font_bold_name = 'ChineseFontBold'
+        except:
+            font_name = 'Helvetica'
+            font_bold_name = 'Helvetica-Bold'
+        
         # 案號樣式
         case_number_style = ParagraphStyle(
             'CaseNumber',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=10,
-            leading=11,
-            fontName='Helvetica-Bold',
+            fontSize=11,
+            leading=12,
+            fontName=font_bold_name,
+            textColor=colors.black,
         )
         
         # 項目名稱樣式
@@ -163,9 +216,21 @@ class VotingBallotPrinter:
             'ItemName',
             parent=styles['Normal'],
             alignment=TA_CENTER,
+            fontSize=9,
+            leading=10,
+            fontName=font_bold_name,
+            textColor=colors.black,
+        )
+        
+        # 投票種類樣式
+        vote_type_style = ParagraphStyle(
+            'VoteType',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
             fontSize=8,
             leading=9,
-            fontName='Helvetica-Bold',
+            fontName=font_name,
+            textColor=colors.darkblue,
         )
         
         # 描述樣式
@@ -175,7 +240,8 @@ class VotingBallotPrinter:
             alignment=TA_CENTER,
             fontSize=7,
             leading=8,
-            fontName='Helvetica',
+            fontName=font_name,
+            textColor=colors.black,
         )
         
         # 投票選項樣式
@@ -185,7 +251,8 @@ class VotingBallotPrinter:
             alignment=TA_CENTER,
             fontSize=6,
             leading=7,
-            fontName='Helvetica',
+            fontName=font_name,
+            textColor=colors.black,
         )
 
         # 每個標籤的寬度
@@ -202,7 +269,8 @@ class VotingBallotPrinter:
         for case_idx, case in enumerate(voting_data):
             case_number = case['case_number']
             case_name = case['name']
-            description = case['description']
+            vote_type = case.get('vote_type', '一般議案')
+            description = case.get('description', '')
             households = case.get('households', [])
             
             print(f"\n📋 處理投票案號 {case_idx + 1}/{len(voting_data)}: 第{case_number}案 {case_name}")
@@ -226,8 +294,10 @@ class VotingBallotPrinter:
                     [Paragraph(f"第 {case_number} 案", case_number_style)],
                     # 項目名稱
                     [Paragraph(case_name, item_name_style)],
+                    # 投票種類
+                    [Paragraph(f"({vote_type})", vote_type_style)],
                     # 描述（限制行數）
-                    [Paragraph(description[:30], description_style)],
+                    [Paragraph(description[:40] if description else "無", description_style)],
                     # 空白（間距）
                     [Spacer(1, 1 * mm)],
                     # 條碼
@@ -241,7 +311,7 @@ class VotingBallotPrinter:
                 ballot_content_table = Table(
                     ballot_content_data,
                     colWidths=[cell_w * 0.95],
-                    rowHeights=[6 * mm, 7 * mm, 7 * mm, 1 * mm, 8 * mm, 4 * mm, 5 * mm],
+                    rowHeights=[6 * mm, 7 * mm, 5 * mm, 6 * mm, 1 * mm, 8 * mm, 4 * mm, 5 * mm],
                 )
                 ballot_content_table.setStyle(TableStyle([
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
