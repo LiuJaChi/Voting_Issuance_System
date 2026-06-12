@@ -1,5 +1,6 @@
 """
 報到窗口 - 移除原始條碼欄位，添加進度條和統計圖表（使用 Matplotlib）
+支持中文字體顯示
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -10,11 +11,40 @@ from PyQt6.QtGui import QFont, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
+import matplotlib
 
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
 from src.backend.utils import format_datetime
 from src.backend.input_sanitizer import clean_barcode_input, print_debug_info
+
+
+# 設置 Matplotlib 中文字體
+def setup_chinese_font():
+    """設置 Matplotlib 中文字體支持"""
+    try:
+        # 嘗試使用系統字體
+        import platform
+        system = platform.system()
+        
+        if system == 'Windows':
+            # Windows 系統使用微軟雅黑
+            matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+        elif system == 'Darwin':
+            # macOS 系統使用蘋果儷黑體
+            matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti TC', 'DejaVu Sans']
+        else:
+            # Linux 系統使用開源字體
+            matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
+        
+        # 解決負號顯示問題
+        matplotlib.rcParams['axes.unicode_minus'] = False
+    except Exception as e:
+        print(f"字體設置失敗: {e}")
+
+
+# 初始化中文字體
+setup_chinese_font()
 
 
 class CheckInWindow(QWidget):
@@ -159,12 +189,12 @@ class CheckInWindow(QWidget):
         colors = []
         
         if checked_in > 0:
-            labels.append(f'已報到\n({checked_in})')
+            labels.append(f'已報到\n({checked_in}人)')
             sizes.append(checked_in)
             colors.append('#4CAF50')  # 綠色
         
         if not_checked_in > 0:
-            labels.append(f'未報到\n({not_checked_in})')
+            labels.append(f'未報到\n({not_checked_in}人)')
             sizes.append(not_checked_in)
             colors.append('#F44336')  # 紅色
         
@@ -180,19 +210,24 @@ class CheckInWindow(QWidget):
             labels=labels,
             colors=colors,
             autopct='%1.1f%%',
-            startangle=90
+            startangle=90,
+            textprops={
+                'fontsize': 9,
+                'weight': 'bold'
+            }
         )
         
         # 美化文本
         for autotext in autotexts:
             autotext.set_color('white')
             autotext.set_fontweight('bold')
-            autotext.set_fontsize(10)
+            autotext.set_fontsize(9)
         
         for text in texts:
-            text.set_fontsize(9)
+            text.set_fontsize(8)
+            text.set_weight('bold')
         
-        ax.set_title('報到狀態分佈', fontsize=12, fontweight='bold', pad=20)
+        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15)
         
         self.figure.tight_layout()
         self.canvas.draw()
