@@ -1,13 +1,20 @@
 """
-投票窗口 - 支持完整的投票流程（載入住戶 → 選擇投票種類 → 刷條碼 → 計數）
+投票窗口 - 完整的投票刷票流程
+
+此窗口支持：
+1. 載入已報到的住戶資料
+2. 選擇投票項目與投票選項
+3. 刷條碼投票
+4. 投票統計與進度顯示
+5. 已投票住戶列表（橫向標籤樣式）
 """
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QTableWidget, QTableWidgetItem, QLineEdit, QMessageBox, QHeaderView,
-    QGroupBox, QRadioButton, QButtonGroup, QProgressBar
+    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QLabel, QLineEdit,
+    QComboBox, QRadioButton, QButtonGroup, QTableWidget, QTableWidgetItem, QProgressBar,
+    QMessageBox, QHeaderView, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QColor, QFont
 
 from src.backend.database import Database
 from src.backend.barcode_generator import BarcodeGenerator
@@ -173,18 +180,26 @@ class VotingWindow(QWidget):
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
-        # ═══════════════════════════ 5. 已投票住戶列表 ═══════════════════════════
+        # ═══════════════════════════ 5. 已投票住戶列表（橫向標籤樣式） ═══════════════════════════
         voted_group = QGroupBox("5️⃣ 已投票住戶列表")
         voted_layout = QVBoxLayout()
         
-        self.voted_table = QTableWidget()
-        self.voted_table.setColumnCount(3)
-        self.voted_table.setHorizontalHeaderLabels(["戶號", "投票選項", "時間"])
-        self.voted_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.voted_table.setMaximumHeight(150)
-        voted_layout.addWidget(self.voted_table)
+        # 建立可滾動的容器
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: 1px solid #DDD; background-color: #F9F9F9; }")
+        
+        # 建立容器widget和布局
+        container_widget = QWidget()
+        self.voted_households_layout = QHBoxLayout()
+        self.voted_households_layout.addStretch()  # 左邊空白
+        self.voted_households_layout.addStretch()  # 右邊空白，保證標籤在中間
+        
+        container_widget.setLayout(self.voted_households_layout)
+        scroll_area.setWidget(container_widget)
+        scroll_area.setMaximumHeight(100)
+        
+        voted_layout.addWidget(scroll_area)
         
         voted_group.setLayout(voted_layout)
         main_layout.addWidget(voted_group)
@@ -433,9 +448,13 @@ class VotingWindow(QWidget):
             print(f"刷新投票統計失敗: {e}")
     
     def refresh_voted_list(self):
-        """刷新已投票住戶列表"""
+        """刷新已投票住戶列表 - 橫向標籤樣式"""
         try:
-            self.voted_table.setRowCount(0)
+            # 清空現有的標籤（保留兩邊的 stretch）
+            while self.voted_households_layout.count() > 2:
+                widget = self.voted_households_layout.takeAt(0).widget()
+                if widget:
+                    widget.deleteLater()
             
             if not self.voting_items or self.current_case_idx >= len(self.voting_items):
                 return
@@ -447,7 +466,7 @@ class VotingWindow(QWidget):
             conn = self.db.get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT v.household_id, v.vote, v.voted_at
+                SELECT v.household_id, v.vote
                 FROM votes v
                 WHERE v.case_number = ?
                 ORDER BY v.voted_at DESC
@@ -456,30 +475,38 @@ class VotingWindow(QWidget):
             votes = cursor.fetchall()
             conn.close()
             
-            for row_idx, vote in enumerate(votes):
-                self.voted_table.insertRow(row_idx)
-                
-                household_id_item = QTableWidgetItem(vote['household_id'])
-                household_id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                
+            # 投票選項顏色映射
+            vote_colors = {
+                '同意': QColor(144, 238, 144),      # 淡綠色
+                '不同意': QColor(255, 160, 122),    # 淡紅色
+                '棄權': QColor(255, 255, 200)       # 淡黃色
+            }
+            
+            # 為每個已投票戶號創建標籤
+            for vote in votes:
+                household_id = vote['household_id']
                 vote_option = vote['vote']
-                vote_item = QTableWidgetItem(vote_option)
-                vote_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                vote_item.setForeground(QColor("black"))
                 
-                # 根據投票選項著色
-                if vote_option == "同意":
-                    vote_item.setBackground(QColor("#C8E6C9"))
-                elif vote_option == "不同意":
-                    vote_item.setBackground(QColor("#FFCDD2"))
-                elif vote_option == "棄權":
-                    vote_item.setBackground(QColor("#FFF9C4"))
+                # 創建戶號標籤
+                label = QLabel(household_id)
+                label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 
-                time_item = QTableWidgetItem(str(vote['voted_at'])[:19])
+                # 根據投票選項設置背景色
+                bg_color = vote_colors.get(vote_option, QColor(200, 200, 200))
+                label.setStyleSheet(f"""
+                    padding: 6px 10px;
+                    border-radius: 5px;
+                    background-color: {bg_color.name()};
+                    color: black;
+                    font-weight: bold;
+                    min-width: 60px;
+                    border: 2px solid {bg_color.darker(150).name()};
+                """)
                 
-                self.voted_table.setItem(row_idx, 0, household_id_item)
-                self.voted_table.setItem(row_idx, 1, vote_item)
-                self.voted_table.setItem(row_idx, 2, time_item)
+                self.voted_households_layout.insertWidget(
+                    self.voted_households_layout.count() - 1, label
+                )
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
