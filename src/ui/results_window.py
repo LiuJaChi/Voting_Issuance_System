@@ -1,5 +1,5 @@
 """
-結果統計窗口
+結果統計窗口 - 包括投票結果和面積（坪）統計
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -30,39 +30,48 @@ class ResultsWindow(QWidget):
         """初始化用戶界面"""
         main_layout = QVBoxLayout()
         
-        # 標題
+        # 標題（白色字）
         title = QLabel("投票結果統計")
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
+        title.setStyleSheet("color: white;")
         main_layout.addWidget(title)
+        
+        # 面積統計信息
+        area_stats_layout = QHBoxLayout()
+        
+        self.total_area_label = QLabel("總坪數: 0 坪")
+        self.total_area_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #1976D2;")
+        area_stats_layout.addWidget(self.total_area_label)
+        
+        self.voted_yes_area_label = QLabel("已投贊成票坪數: 0 坪")
+        self.voted_yes_area_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #4CAF50;")
+        area_stats_layout.addWidget(self.voted_yes_area_label)
+        
+        self.voted_yes_area_percentage_label = QLabel("贊成票坪數占比: 0%")
+        self.voted_yes_area_percentage_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #FF9800;")
+        area_stats_layout.addWidget(self.voted_yes_area_percentage_label)
+        
+        area_stats_layout.addStretch()
+        main_layout.addLayout(area_stats_layout)
         
         # 結果表格
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(6)
+        self.results_table.setColumnCount(8)
         self.results_table.setHorizontalHeaderLabels([
-            "投票項目", "贊成票", "反對票", "投票人數", "贊成率(%)", "結果"
+            "投票項目", "贊成票", "反對票", "投票人數", "贊成率(%)", 
+            "贊成坪數", "反對坪數", "結果"
         ])
         
         self.results_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            1, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            3, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            4, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.results_table.horizontalHeader().setSectionResizeMode(
-            5, QHeaderView.ResizeMode.ResizeToContents
-        )
+        for col in range(1, 8):
+            self.results_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.ResizeToContents
+            )
         
         main_layout.addWidget(self.results_table)
         
@@ -100,7 +109,20 @@ class ResultsWindow(QWidget):
         
         if not voting_items:
             QMessageBox.warning(self, "警告", "沒有投票項目資料")
+            self.update_area_stats(0, 0, 0)
             return
+        
+        # 初始化面積統計
+        total_voted_yes_area = 0
+        total_area = 0
+        
+        # 獲取總坪數
+        conn = self.db.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households")
+        result = cursor.fetchone()
+        total_area = result['total_area'] if result else 0
+        conn.close()
         
         row_idx = 0
         for item in voting_items:
@@ -117,15 +139,34 @@ class ResultsWindow(QWidget):
             yes_percentage = (yes_count / total * 100) if total > 0 else 0
             passed = "✓ 通過" if yes_percentage >= pass_percentage else "✗ 未通過"
             
+            # 獲取贊成和反對的坪數
+            yes_area = self.db.get_voting_area_by_vote(case_number, '同意')
+            no_area = self.db.get_voting_area_by_vote(case_number, '反對')
+            
+            total_voted_yes_area += yes_area
+            
             self.results_table.insertRow(row_idx)
             self.results_table.setItem(row_idx, 0, QTableWidgetItem(item_name))
             self.results_table.setItem(row_idx, 1, QTableWidgetItem(str(yes_count)))
             self.results_table.setItem(row_idx, 2, QTableWidgetItem(str(no_count)))
             self.results_table.setItem(row_idx, 3, QTableWidgetItem(str(total)))
             self.results_table.setItem(row_idx, 4, QTableWidgetItem(f"{yes_percentage:.2f}"))
-            self.results_table.setItem(row_idx, 5, QTableWidgetItem(passed))
+            self.results_table.setItem(row_idx, 5, QTableWidgetItem(f"{yes_area:.2f}"))
+            self.results_table.setItem(row_idx, 6, QTableWidgetItem(f"{no_area:.2f}"))
+            self.results_table.setItem(row_idx, 7, QTableWidgetItem(passed))
             
             row_idx += 1
+        
+        # 更新面積統計
+        self.update_area_stats(total_area, total_voted_yes_area)
+    
+    def update_area_stats(self, total_area, voted_yes_area):
+        """更新面積統計標籤"""
+        voted_yes_area_percentage = (voted_yes_area / total_area * 100) if total_area > 0 else 0
+        
+        self.total_area_label.setText(f"總坪數: {total_area:.2f} 坪")
+        self.voted_yes_area_label.setText(f"已投贊成票坪數: {voted_yes_area:.2f} 坪")
+        self.voted_yes_area_percentage_label.setText(f"贊成票坪數占比: {voted_yes_area_percentage:.2f}%")
     
     def merge_device_data(self):
         """合併多設備數據"""
