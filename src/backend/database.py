@@ -91,7 +91,7 @@ class Database:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS check_in_records (
                 household_id TEXT PRIMARY KEY,
-                checked_in_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                checked_in_at TIMESTAMP,
                 device_id TEXT,
                 FOREIGN KEY (household_id) REFERENCES households(household_id)
             )
@@ -284,14 +284,19 @@ class Database:
     # ─────────────────────────── 報到管理 ───────────────────────────
 
     def check_in_household(self, household_id: str, device_id: str = None) -> bool:
-        """住戶報到"""
+        """住戶報到 - 使用電腦當前系統時間"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
+            # 使用電腦當前系統時間，而不是數據庫服務器時間
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            print(f"📝 報到時間: {current_time} (戶號: {household_id})")
+            
             cursor.execute("""
-                INSERT INTO check_in_records (household_id, device_id)
-                VALUES (?, ?)
-            """, (household_id, device_id))
+                INSERT INTO check_in_records (household_id, checked_in_at, device_id)
+                VALUES (?, ?, ?)
+            """, (household_id, current_time, device_id))
             cursor.execute("""
                 UPDATE households SET status = 'checked_in'
                 WHERE household_id = ?
@@ -532,9 +537,9 @@ class Database:
         conn.close()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════════════
 # CheckInDatabase 類 - 專為即時報到系統設計
-# ═══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════════════
 
 class CheckInDatabase:
     """即時報到系統專用資料庫"""
@@ -584,7 +589,7 @@ class CheckInDatabase:
 
     def check_in(self, household_id: str, name: str = None) -> tuple:
         """
-        記錄報到
+        記錄報到 - 使用電腦當前系統時間
         返回 (success: bool, message: str, status_code: int)
         """
         household_id = str(household_id).strip()
@@ -595,10 +600,13 @@ class CheckInDatabase:
         cursor = conn.cursor()
         
         try:
+            # 使用電腦當前系統時間
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
             cursor.execute("""
-                INSERT INTO check_in_records (household_id, name, status)
-                VALUES (?, ?, 'checked_in')
-            """, (household_id, name))
+                INSERT INTO check_in_records (household_id, name, check_in_time, status)
+                VALUES (?, ?, ?, 'checked_in')
+            """, (household_id, name, current_time))
             conn.commit()
             conn.close()
             return True, f'Check-in successful for {household_id}', 200
