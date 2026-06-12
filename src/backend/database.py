@@ -9,6 +9,8 @@
 - 條碼映射（household_id, barcode_data）
 """
 import sqlite3
+import csv
+import io
 import json
 from datetime import datetime
 from pathlib import Path
@@ -483,6 +485,255 @@ class Database:
         """獲取所有投票項目的結果"""
         items = self.get_all_voting_items()
         return [self.get_voting_results(item['case_number']) for item in items]
+
+    # ─────────────────────────── 投票數據匯出/匯入 ───────────────────────────
+
+    @staticmethod
+    def _fmt_timestamp(ts) -> str:
+        """將時間戳截取為 'YYYY-MM-DD HH:MM:SS' 格式字符串"""
+        return str(ts)[:19] if ts else ''
+
+    def export_voting_data(self, format: str = 'csv', export_path: str = None) -> str:
+        """匯出所有投票數據，支持 csv 和 json 兩種格式。
+
+        Returns:
+            匯出的文件路徑字符串，失敗時返回空字符串。
+        """
+        format = format.lower()
+        if export_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            export_path = f"exports/votes_{timestamp}.{format}"
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 取得所有投票記錄，JOIN 投票項目以獲得 case_name
+            cursor.execute("""
+                SELECT v.household_id,
+                       v.case_number,
+                       vi.name AS case_name,
+                       v.vote,
+                       v.voted_at
+                FROM votes v
+                LEFT JOIN voting_items vi ON v.case_number = vi.case_number
+                ORDER BY v.case_number, v.household_id
+            """)
+            votes = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM voting_items ORDER BY case_number")
+            voting_items = [dict(row) for row in cursor.fetchall()]
+
+            conn.close()
+
+            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
+
+            if format == 'csv':
+                # utf-8-sig adds a BOM so that Excel on Windows opens the file correctly
+                with open(export_path, 'w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.DictWriter(
+                        f,
+                        fieldnames=['household_id', 'case_number', 'case_name', 'vote', 'voted_at']
+                    )
+                    writer.writeheader()
+                    for row in votes:
+                        writer.writerow({
+                            'household_id': row['household_id'],
+                            'case_number': row['case_number'],
+                            'case_name': row.get('case_name', ''),
+                            'vote': row['vote'],
+                            'voted_at': self._fmt_timestamp(row['voted_at']),
+                        })
+            elif format == 'json':
+                export_data = {
+                    'export_time': datetime.now().isoformat(),
+                    'total_records': len(votes),
+                    'voting_items': voting_items,
+                    'votes': [
+                        {
+                            'household_id': r['household_id'],
+                            'case_number': r['case_number'],
+                            'case_name': r.get('case_name', ''),
+                            'vote': r['vote'],
+                            'voted_at': self._fmt_timestamp(r['voted_at']),
+                        }
+                        for r in votes
+                    ],
+                }
+                with open(export_path, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
+            else:
+                print(f"✗ 不支持的格式: {format}")
+                return ''
+
+            print(f"✓ 投票數據已匯出到: {export_path}（共 {len(votes)} 筆）")
+            return export_path
+        except Exception as e:
+            print(f"✗ 投票數據匯出失敗: {e}")
+            return ''
+
+    def validate_voting_data(self, data: List[Dict]) -> Tuple[List[Dict], List[str]]:
+        """驗證匯入的投票數據格式和內容。
+
+        Args:
+            data: 每筆記錄包含 household_id, case_number, vote 欄位的列表。
+
+        Returns:
+            (valid_rows, errors) — 通過驗證的列表和錯誤訊息列表。
+        """
+        valid_options = {'同意', '不同意', '棄權'}
+
+        # 預先獲取所有合法的 household_id 和 case_number
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT household_id FROM households")
+        existing_households = {row['household_id'] for row in cursor.fetchall()}
+        cursor.execute("SELECT case_number FROM voting_items")
+        existing_cases = {row['case_number'] for row in cursor.fetchall()}
+        conn.close()
+
+        valid_rows: List[Dict] = []
+        errors: List[str] = []
+
+        for idx, row in enumerate(data, start=1):
+            household_id = str(row.get('household_id', '')).strip()
+            case_number = str(row.get('case_number', '')).strip()
+            vote = str(row.get('vote', '')).strip()
+
+            if not household_id:
+                errors.append(f"第 {idx} 筆：household_id 為空")
+                continue
+            if not case_number:
+                errors.append(f"第 {idx} 筆（{household_id}）：case_number 為空")
+                continue
+            if vote not in valid_options:
+                errors.append(f"第 {idx} 筆（{household_id}/{case_number}）：無效投票選項「{vote}」")
+                continue
+            if household_id not in existing_households:
+                errors.append(f"第 {idx} 筆：戶號「{household_id}」不存在")
+                continue
+            if case_number not in existing_cases:
+                errors.append(f"第 {idx} 筆：案號「{case_number}」不存在")
+                continue
+
+            valid_rows.append({
+                'household_id': household_id,
+                'case_number': case_number,
+                'vote': vote,
+                'voted_at': str(row.get('voted_at', '')).strip() or None,
+            })
+
+        return valid_rows, errors
+
+    def import_voting_data(self, file_path: str, mode: str = 'merge') -> Dict:
+        """匯入投票數據。
+
+        Args:
+            file_path: CSV 或 JSON 文件路徑。
+            mode: 'merge'（合併）或 'replace'（覆蓋）。
+
+        Returns:
+            包含 success, skipped, errors, messages 的字典。
+        """
+        result = {
+            'success': 0,
+            'skipped': 0,
+            'errors': [],
+            'messages': [],
+        }
+
+        try:
+            file_path = str(file_path)
+            ext = Path(file_path).suffix.lower()
+
+            # 讀取文件
+            raw_rows: List[Dict] = []
+            if ext == '.csv':
+                with open(file_path, newline='', encoding='utf-8-sig') as f:
+                    reader = csv.DictReader(f)
+                    raw_rows = list(reader)
+            elif ext == '.json':
+                with open(file_path, encoding='utf-8') as f:
+                    data = json.load(f)
+                # 支持兩種 JSON 結構：純列表，或含 "votes" 鍵的物件
+                if isinstance(data, list):
+                    raw_rows = data
+                elif isinstance(data, dict) and 'votes' in data:
+                    raw_rows = data['votes']
+                else:
+                    result['errors'].append('JSON 格式不正確：需要列表或含 "votes" 鍵的物件')
+                    return result
+            else:
+                result['errors'].append(f'不支持的文件格式：{ext}（僅支持 .csv / .json）')
+                return result
+
+            if not raw_rows:
+                result['messages'].append('文件中沒有數據記錄')
+                return result
+
+            # 驗證數據
+            valid_rows, errors = self.validate_voting_data(raw_rows)
+            result['errors'].extend(errors)
+
+            if not valid_rows:
+                result['messages'].append('沒有通過驗證的有效記錄')
+                return result
+
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 覆蓋模式：清空所有投票記錄
+            if mode == 'replace':
+                cursor.execute("DELETE FROM votes")
+                conn.commit()
+                result['messages'].append('已清空現有投票記錄（覆蓋模式）')
+
+            # 記錄插入前的行數，用於計算實際成功數
+            cursor.execute("SELECT COUNT(*) FROM votes")
+            count_before = cursor.fetchone()[0]
+
+            # 使用 INSERT OR IGNORE 批量插入，重複記錄由資料庫自動跳過
+            rows_with_time = [
+                (r['household_id'], r['case_number'], r['vote'], r['voted_at'])
+                for r in valid_rows if r.get('voted_at')
+            ]
+            rows_no_time = [
+                (r['household_id'], r['case_number'], r['vote'])
+                for r in valid_rows if not r.get('voted_at')
+            ]
+
+            if rows_with_time:
+                cursor.executemany("""
+                    INSERT OR IGNORE INTO votes (household_id, case_number, vote, voted_at)
+                    VALUES (?, ?, ?, ?)
+                """, rows_with_time)
+
+            if rows_no_time:
+                cursor.executemany("""
+                    INSERT OR IGNORE INTO votes (household_id, case_number, vote)
+                    VALUES (?, ?, ?)
+                """, rows_no_time)
+
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) FROM votes")
+            count_after = cursor.fetchone()[0]
+            conn.close()
+
+            result['success'] = count_after - count_before
+            result['skipped'] = len(valid_rows) - result['success']
+
+            result['messages'].append(
+                f"匯入完成：成功 {result['success']} 筆，"
+                f"跳過重複 {result['skipped']} 筆，"
+                f"驗證錯誤 {len(result['errors'])} 筆"
+            )
+            print(f"✓ 投票數據匯入完成: {result}")
+        except Exception as e:
+            result['errors'].append(f'匯入失敗：{e}')
+            print(f"✗ 投票數據匯入失敗: {e}")
+
+        return result
 
     # ─────────────────────────── 數據導出 ───────────────────────────
 
