@@ -1,11 +1,22 @@
 """
 投票單 PDF 生成模塊 - 使用 python-barcode 生成 Code128 條碼圖像
 
-投票單規格：
-- 每張投票單：案號 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項
-- 每張大小：約 95mm × 85mm（原 70mm，已增加高度以容納放大的字體）
-- 每頁 A4：2 欄 × 3 列 = 6 張（原為 2 欄 × 4 列 = 8 張）
-- 內容：第X案 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項(同意/不同意/棄權)
+投票單規格（精確規格）：
+- 每張選票高度：80mm (8cm)
+- 上邊距：5mm (0.5cm)
+- 下邊距：5mm (0.5cm)
+- 可用高度：70mm
+- 寬度：95mm
+- 條碼尺寸：54mm × 8mm
+- 每頁 A4：2 欄 × 4 列 = 8 張
+
+內容佈局：
+- 第X案 + 項目名稱：20mm
+- 投票種類 + 描述：15mm
+- 空白間距：5mm
+- 條碼 (54×8mm)：8mm
+- 戶號 + 投票選項：22mm
+- 總計：70mm
 """
 import os
 import shutil
@@ -26,13 +37,20 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 
-# 投票單（標籤）尺寸 - 高度從 70mm 增加到 85mm
+# 投票單（標籤）尺寸 - 精確規格 8cm = 80mm
 LABEL_WIDTH = 95 * mm
-LABEL_HEIGHT = 85 * mm  # 原為 70mm，現增加為 85mm
+LABEL_HEIGHT = 80 * mm  # 8cm 精確規格
+LABEL_TOP_MARGIN = 5 * mm  # 上邊距 0.5cm
+LABEL_BOTTOM_MARGIN = 5 * mm  # 下邊距 0.5cm
+USABLE_HEIGHT = 70 * mm  # 可用高度
 
-# 每頁欄數與列數 - 從 2 欄 × 4 列 改為 2 欄 × 3 列
+# 條碼規格
+BARCODE_WIDTH = 54 * mm
+BARCODE_HEIGHT = 8 * mm
+
+# 每頁欄數與列數 - 2 欄 × 4 列
 COLS_PER_PAGE = 2
-ROWS_PER_PAGE = 3  # 原為 4，現改為 3
+ROWS_PER_PAGE = 4
 
 
 class VotingBallotPrinter:
@@ -43,7 +61,7 @@ class VotingBallotPrinter:
         self.output_dir = output_dir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         
-        # 建立臨時條碼目錄（用於存儲 PDF 生成過程中的條碼）
+        # 建立臨時條碼目錄
         self.temp_barcode_dir = os.path.join(output_dir, ".temp_barcodes")
         Path(self.temp_barcode_dir).mkdir(parents=True, exist_ok=True)
         
@@ -52,7 +70,6 @@ class VotingBallotPrinter:
     def _init_chinese_fonts(self):
         """初始化繁體中文字體支持"""
         try:
-            # 嘗試註冊中文字體
             font_paths = [
                 "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
                 "/System/Library/Fonts/STHeiti Medium.ttf",  # macOS
@@ -78,7 +95,7 @@ class VotingBallotPrinter:
 
     def _generate_code128_image(self, content: str) -> str:
         """
-        生成 Code128 條碼圖像
+        生成 Code128 條碼圖像 (54mm × 8mm)
         
         Args:
             content: 條碼內容
@@ -106,23 +123,8 @@ class VotingBallotPrinter:
         """
         生成投票單 PDF
         
-        投票單格式：
-        第X案 + 項目名稱 + 投票種類 + 描述 + 住戶條碼 + 投票選項
-        
         Args:
-            voting_data: [
-                {
-                    'case_number': '1',
-                    'name': '物業管理費調整',
-                    'vote_type': '重大議案',
-                    'description': '擬調整2026年物業管理費',
-                    'households': [
-                        {'household_id': 'A106-02', 'name': '洪正平'},
-                        ...
-                    ]
-                },
-                ...
-            ]
+            voting_data: 投票數據列表
             filename: 輸出文件名
             
         Returns:
@@ -153,13 +155,13 @@ class VotingBallotPrinter:
             font_name = 'Helvetica'
             font_bold_name = 'Helvetica-Bold'
         
-        # 案號樣式
+        # 案號樣式 - 縮小以適應 20mm 空間
         case_number_style = ParagraphStyle(
             'CaseNumber',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=14,
-            leading=16,
+            fontSize=12,
+            leading=13,
             fontName=font_bold_name,
             textColor=colors.darkblue,
         )
@@ -169,8 +171,8 @@ class VotingBallotPrinter:
             'ItemName',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=9,
-            leading=10,
+            fontSize=8,
+            leading=9,
             fontName=font_name,
             textColor=colors.darkblue,
         )
@@ -180,8 +182,8 @@ class VotingBallotPrinter:
             'VoteType',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=7,
-            leading=8,
+            fontSize=6,
+            leading=7,
             fontName=font_name,
             textColor=colors.darkblue,
         )
@@ -191,21 +193,32 @@ class VotingBallotPrinter:
             'Description',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=7,
-            leading=8,
+            fontSize=6,
+            leading=7,
             fontName=font_name,
             textColor=colors.black,
         )
         
-        # 投票選項樣式 - 12pt 粗體紅色
+        # 投票選項樣式 - 12pt 粗體紅色（突出顯示）
         voting_option_style = ParagraphStyle(
             'VotingOption',
             parent=styles['Normal'],
             alignment=TA_CENTER,
             fontSize=12,
-            leading=14,
+            leading=13,
             fontName=font_bold_name,
             textColor=colors.darkred,
+        )
+        
+        # 戶號樣式
+        household_id_style = ParagraphStyle(
+            'HouseholdID',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
+            fontSize=7,
+            leading=8,
+            fontName=font_bold_name,
+            textColor=colors.black,
         )
 
         # 每個標籤的寬度
@@ -236,43 +249,61 @@ class VotingBallotPrinter:
                 barcode_path = self._generate_code128_image(household_id)
                 
                 if barcode_path and os.path.exists(barcode_path):
-                    code128_img = RLImage(barcode_path, width=7 * mm, height=5 * mm)
+                    code128_img = RLImage(barcode_path, width=BARCODE_WIDTH, height=BARCODE_HEIGHT)
                 else:
-                    code128_img = Paragraph(f"Error: {household_id}", item_name_style)
+                    code128_img = Paragraph(f"{household_id}", household_id_style)
                 
-                # 構建投票單內容 - 調整行高以適應新的票高 85mm
+                # 構建投票單內容 - 精確按 70mm 可用高度分配
                 ballot_content_data = [
-                    # 第X案
+                    # 上邊距 (5mm)
+                    [Spacer(1, 5 * mm)],
+                    
+                    # 第X案 + 項目名稱區段 (20mm)
                     [Paragraph(f"第 {case_number} 案", case_number_style)],
-                    # 項目名稱
                     [Paragraph(case_name, item_name_style)],
-                    # 投票種類
+                    
+                    # 投票種類 + 描述區段 (15mm)
                     [Paragraph(f"({vote_type})", vote_type_style)],
-                    # 描述（限制行數）
-                    [Paragraph(description[:40] if description else "無", description_style)],
-                    # 空白（間距）
-                    [Spacer(1, 2 * mm)],
-                    # 條碼
+                    [Paragraph(description[:50] if description else "", description_style)],
+                    
+                    # 空白間距 (5mm)
+                    [Spacer(1, 5 * mm)],
+                    
+                    # 條碼區段 (8mm) - 54mm × 8mm
                     [code128_img],
-                    # 住戶條碼下方顯示戶號
-                    [Paragraph(household_id, voting_option_style)],
-                    # 投票選項 - 12pt 粗體紅色
+                    
+                    # 戶號 + 投票選項區段 (22mm)
+                    [Paragraph(household_id, household_id_style)],
                     [Paragraph("□ 同意  □ 不同意  □ 棄權", voting_option_style)],
+                    
+                    # 下邊距 (5mm)
+                    [Spacer(1, 5 * mm)],
                 ]
                 
                 ballot_content_table = Table(
                     ballot_content_data,
                     colWidths=[cell_w * 0.95],
-                    # 調整行高：案號6mm、項名7mm、種類5mm、描述6mm、間距2mm、條碼5mm、戶號5mm、選項6mm
-                    rowHeights=[6 * mm, 7 * mm, 5 * mm, 6 * mm, 2 * mm, 5 * mm, 5 * mm, 6 * mm],
+                    # 行高分配
+                    rowHeights=[
+                        5 * mm,      # 上邊距
+                        8 * mm,      # 案號
+                        7 * mm,      # 項名
+                        4 * mm,      # 種類
+                        6 * mm,      # 描述
+                        5 * mm,      # 空白
+                        8 * mm,      # 條碼
+                        5 * mm,      # 戶號
+                        6 * mm,      # 選項
+                        5 * mm,      # 下邊距
+                    ],
                 )
                 ballot_content_table.setStyle(TableStyle([
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-                    ('TOPPADDING', (0, 0), (-1, -1), 2),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 1),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+                    ('TOPPADDING', (0, 0), (-1, -1), 1),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
                     # 邊框
                     ('BOX', (0, 0), (-1, -1), 0.5, colors.black),
                 ]))
@@ -311,10 +342,15 @@ class VotingBallotPrinter:
         print(f"\n📄 開始生成 PDF: {output_path}")
         doc.build([table])
         print(f"✓ PDF 生成完成: {output_path}")
-        print(f"📊 每頁配置: 2 欄 × 3 列 = 6 張投票單/頁（原為 8 張）")
-        print(f"📏 每張尺寸: 95mm × 85mm（原為 70mm）")
+        print(f"\n📊 選票規格:")
+        print(f"   票高度: 80mm (8cm)")
+        print(f"   上邊距: 5mm (0.5cm)")
+        print(f"   下邊距: 5mm (0.5cm)")
+        print(f"   可用高度: 70mm")
+        print(f"   條碼尺寸: 54mm × 8mm")
+        print(f"   每頁配置: 2 欄 × 4 列 = 8 張")
 
-        # PDF 已生成完成，現在可以��全地清理臨時條碼文件
+        # 清理臨時條碼文件
         self._cleanup_temp_barcode_dir()
         
         return output_path
