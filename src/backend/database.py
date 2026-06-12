@@ -3,6 +3,7 @@
 
 使用 SQLite 存儲：
 - 住戶信息（household_id, name, share_amount）
+- 報到記錄（household_id, checked_in_at）
 - 投票項目（case_number, name, description, vote_type, pass_percentage）
 - 投票記錄（household_id, case_number, vote）
 - 條碼映射（household_id, barcode_data）
@@ -38,6 +39,17 @@ class Database:
                 name TEXT NOT NULL,
                 share_amount REAL DEFAULT 0.0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 報到記錄表
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS check_in_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                household_id TEXT NOT NULL UNIQUE,
+                checked_in_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                device_id TEXT,
+                FOREIGN KEY (household_id) REFERENCES households(household_id)
             )
         """)
 
@@ -229,6 +241,49 @@ class Database:
         except Exception:
             conn.close()
             return False
+
+    # ─────────────────────────── 報到管理 ───────────────────────────
+
+    def check_in_household(self, household_id: str, device_id: str = None) -> bool:
+        """住戶報到 - 使用電腦當前系統時間"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            # 使用電腦當前系統時間，而不是數據庫服務器時間
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            print(f"📝 報到時間: {current_time} (戶號: {household_id})")
+
+            cursor.execute("""
+                INSERT INTO check_in_records (household_id, checked_in_at, device_id)
+                VALUES (?, ?, ?)
+            """, (household_id, current_time, device_id))
+            conn.commit()
+            conn.close()
+            return True
+        except sqlite3.IntegrityError:
+            conn.close()
+            return False
+
+    def get_check_in_stats(self) -> Dict:
+        """獲取報到統計"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) as count FROM households")
+        total = cursor.fetchone()['count']
+
+        cursor.execute("SELECT COUNT(*) as count FROM check_in_records")
+        checked_in = cursor.fetchone()['count']
+
+        conn.close()
+
+        percentage = (checked_in / total * 100) if total > 0 else 0
+        return {
+            'total_expected': total,
+            'checked_in': checked_in,
+            'percentage': round(percentage, 2)
+        }
 
     # ─────────────────────────── 投票項目管理 ───────────────────────────
 
