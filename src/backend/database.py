@@ -8,6 +8,8 @@
 - 投票記錄（household_id, case_number, vote）
 - 條碼映射（household_id, barcode_data）
 """
+import json
+import os
 import sqlite3
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -492,6 +494,66 @@ class Database:
         """獲取所有投票項目的結果"""
         items = self.get_all_voting_items()
         return [self.get_voting_results(item['case_number']) for item in items]
+
+    # ─────────────────────────── 數據管理 ───────────────────────────
+
+    def export_data(self) -> bool:
+        """導出所有數據庫內容到 exports/ 目錄下的 JSON 檔案"""
+        conn = None
+        try:
+            os.makedirs("exports", exist_ok=True)
+            export_path = os.path.join("exports", "data.json")
+
+            data = {
+                "exported_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "households": self.get_all_households(),
+                "check_in_records": [],
+                "voting_items": self.get_all_voting_items(),
+                "votes": [],
+                "barcode_mapping": self.get_all_barcode_mappings(),
+            }
+
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT * FROM check_in_records ORDER BY checked_in_at")
+            data["check_in_records"] = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute("SELECT * FROM votes ORDER BY voted_at")
+            data["votes"] = [dict(row) for row in cursor.fetchall()]
+
+            conn.close()
+            conn = None
+
+            with open(export_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+
+            return True
+        except Exception as e:
+            print(f"導出數據失敗: {e}")
+            return False
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def clear_all_data(self) -> bool:
+        """清空所有資料表中的資料（households, check_in_records, voting_items, votes, barcode_mapping）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM votes")
+            cursor.execute("DELETE FROM check_in_records")
+            cursor.execute("DELETE FROM barcode_mapping")
+            cursor.execute("DELETE FROM voting_items")
+            cursor.execute("DELETE FROM households")
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            print(f"清空數據失敗: {e}")
+            return False
 
     # ─────────────────────────── 向後兼容 ───────────────────────────
 
