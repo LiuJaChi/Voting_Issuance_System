@@ -144,7 +144,7 @@ class VotingWindow(QWidget):
         main_layout.addWidget(barcode_group)
         
         # ═══════════════════════════ 4. 投票統計 ═══════════════════════════
-        stats_group = QGroupBox("4️⃣ 投票統計（坪數百分比）")
+        stats_group = QGroupBox("4️⃣ 投票統計（出席坪數百分比）")
         stats_layout = QVBoxLayout()
         
         # 投票進度
@@ -157,12 +157,12 @@ class VotingWindow(QWidget):
         self.progress_bar.setValue(0)
         stats_layout.addWidget(self.progress_bar)
         
-        # 投票結果表 - 坪數百分比顯示
+        # 投票結果表 - 坪數百分比顯示（分母為出席住戶總坪數）
         self.vote_stats_table = QTableWidget()
         self.vote_stats_table.setColumnCount(9)
         self.vote_stats_table.setHorizontalHeaderLabels(
             ["案號", "項目名稱", "同意", "不同意", "棄權", 
-             "同意坪數%", "不同意坪數%", "棄權坪數%", "進度"]
+             "同意%", "不同意%", "棄權%", "進度"]
         )
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -416,13 +416,37 @@ class VotingWindow(QWidget):
             self.vote_message_label.setText(f"❌ 錯誤: {str(e)}")
             self.vote_message_label.setStyleSheet("color: #F44336; font-weight: bold;")
     
+    def get_checked_in_total_area(self):
+        """獲取出席住戶的總坪數"""
+        try:
+            if not self.checked_in_households:
+                return 0.0
+            
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            
+            # 計算出席住戶的總坪數
+            placeholders = ','.join(['?' for _ in self.checked_in_households])
+            query = f"SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households WHERE household_id IN ({placeholders})"
+            cursor.execute(query, list(self.checked_in_households))
+            result = cursor.fetchone()
+            conn.close()
+            
+            return result['total_area'] if result else 0.0
+        except Exception as e:
+            print(f"獲取出席住戶總坪數失敗: {e}")
+            return 0.0
+    
     def refresh_vote_stats(self):
-        """刷新投票統計 - 顯示坪數百分比"""
+        """刷新投票統計 - 顯示坪數百分比（分母為出席住戶總坪數）"""
         try:
             self.vote_stats_table.setRowCount(0)
             
             if not self.voting_items:
                 return
+            
+            # 獲取出席住戶的總坪數
+            checked_in_total_area = self.get_checked_in_total_area()
             
             total_households = len(self.checked_in_households)
             
@@ -446,15 +470,12 @@ class VotingWindow(QWidget):
                 disagree_area = self.db.get_voting_area_by_vote(case_number, '不同意')
                 abstain_area = self.db.get_voting_area_by_vote(case_number, '棄權')
                 
-                # 計算總坪數
-                total_area = agree_area + disagree_area + abstain_area
+                # 計算坪數百分比 - 分母為出席住戶總坪數
+                agree_area_pct = (agree_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
+                disagree_area_pct = (disagree_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
+                abstain_area_pct = (abstain_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
                 
-                # 計算坪數百分比
-                agree_area_pct = (agree_area / total_area * 100) if total_area > 0 else 0
-                disagree_area_pct = (disagree_area / total_area * 100) if total_area > 0 else 0
-                abstain_area_pct = (abstain_area / total_area * 100) if total_area > 0 else 0
-                
-                # 計算該案件的進度百分比
+                # 計算該案件的進度百分比（按人數）
                 case_progress = int((total_count / total_households) * 100) if total_households > 0 else 0
                 
                 # 填充表格
@@ -478,7 +499,7 @@ class VotingWindow(QWidget):
                 abstain_item.setBackground(QColor("#FFF9C4"))
                 abstain_item.setForeground(QColor("black"))
                 
-                # 面積坪數百分比列
+                # 面積坪數百分比列（分母為出席住戶總坪數）
                 agree_area_pct_item = QTableWidgetItem(f"{agree_area_pct:.2f}%")
                 agree_area_pct_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 agree_area_pct_item.setBackground(QColor("#C8E6C9"))
