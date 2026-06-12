@@ -1,12 +1,14 @@
 """
-報到窗口 - 支持條碼映射比對
+報到窗口 - 移除原始條碼欄位，添加進度條和統計圖表
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView, QDialog
+    QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtChart import QChart, QChartView, QPieSeries, QPieSlice
+from PyQt6.QtGui import QPainter
 
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
@@ -14,70 +16,8 @@ from src.backend.utils import format_datetime
 from src.backend.input_sanitizer import clean_barcode_input, print_debug_info
 
 
-class BarcodeSettingDialog(QDialog):
-    """條碼對應設置對話框"""
-    
-    def __init__(self, parent=None, household_id: str = None, existing_barcode: str = None):
-        """
-        初始化對話框
-        
-        Args:
-            parent: 父窗口
-            household_id: 戶號
-            existing_barcode: 已存在的條碼
-        """
-        super().__init__(parent)
-        self.household_id = household_id
-        self.existing_barcode = existing_barcode
-        self.barcode_result = None
-        self.init_ui()
-    
-    def init_ui(self):
-        """初始化UI"""
-        self.setWindowTitle("設置條碼對應")
-        self.setGeometry(100, 100, 400, 150)
-        
-        layout = QVBoxLayout()
-        
-        # 戶號標籤
-        layout.addWidget(QLabel(f"戶號: {self.household_id}"))
-        
-        # 條碼輸入
-        layout.addWidget(QLabel("請掃描條碼或輸入條碼數據:"))
-        self.barcode_input = QLineEdit()
-        if self.existing_barcode:
-            self.barcode_input.setText(self.existing_barcode)
-        self.barcode_input.setPlaceholderText("掃描或輸入條碼...")
-        layout.addWidget(self.barcode_input)
-        
-        # 按鈕
-        button_layout = QHBoxLayout()
-        
-        confirm_btn = QPushButton("確認")
-        confirm_btn.clicked.connect(self.accept)
-        button_layout.addWidget(confirm_btn)
-        
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-    
-    def get_barcode(self) -> str:
-        """獲取條碼 - 自動清理隱藏字符"""
-        raw_input = self.barcode_input.text()
-        cleaned = clean_barcode_input(raw_input)
-        
-        # 調試輸出
-        if raw_input != cleaned:
-            print_debug_info(raw_input, cleaned)
-        
-        return cleaned
-
-
 class CheckInWindow(QWidget):
-    """報到窗口"""
+    """報到窗口 - 支持進度顯示和圖表統計"""
     
     def __init__(self, parent=None):
         """初始化報到窗口"""
@@ -89,7 +29,10 @@ class CheckInWindow(QWidget):
     
     def init_ui(self):
         """初始化用戶界面"""
-        main_layout = QVBoxLayout()
+        main_layout = QHBoxLayout()
+        
+        # ========== 左側布局 ==========
+        left_layout = QVBoxLayout()
         
         # 標題
         title = QLabel("報到管理")
@@ -97,7 +40,7 @@ class CheckInWindow(QWidget):
         title_font.setPointSize(14)
         title_font.setBold(True)
         title.setFont(title_font)
-        main_layout.addWidget(title)
+        left_layout.addWidget(title)
         
         # 統計信息
         stats_layout = QHBoxLayout()
@@ -111,23 +54,39 @@ class CheckInWindow(QWidget):
         stats_layout.addWidget(self.percentage_label)
         stats_layout.addStretch()
         
-        main_layout.addLayout(stats_layout)
+        left_layout.addLayout(stats_layout)
+        
+        # 進度條
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+            }
+        """)
+        left_layout.addWidget(self.progress_bar)
         
         # 條碼掃描輸入
         scan_layout = QHBoxLayout()
-        scan_layout.addWidget(QLabel("掃描條碼:"))
+        scan_layout.addWidget(QLabel("掃描戶號:"))
         self.barcode_input = QLineEdit()
         self.barcode_input.setPlaceholderText("請掃描條碼進行報到...")
         self.barcode_input.returnPressed.connect(self.process_check_in)
         scan_layout.addWidget(self.barcode_input)
         
-        main_layout.addLayout(scan_layout)
+        left_layout.addLayout(scan_layout)
         
-        # 報到記錄表
+        # 報到記錄表 - 移除原始條碼欄位
         self.check_in_table = QTableWidget()
-        self.check_in_table.setColumnCount(4)
+        self.check_in_table.setColumnCount(3)
         self.check_in_table.setHorizontalHeaderLabels(
-            ["戶號", "原始條碼", "報到時間", "狀態"]
+            ["戶號", "報到時間", "狀態"]
         )
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
@@ -135,7 +94,10 @@ class CheckInWindow(QWidget):
         self.check_in_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
-        main_layout.addWidget(self.check_in_table)
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        left_layout.addWidget(self.check_in_table)
         
         # 按鈕佈局
         button_layout = QHBoxLayout()
@@ -153,79 +115,116 @@ class CheckInWindow(QWidget):
         button_layout.addWidget(clear_button)
         
         button_layout.addStretch()
-        main_layout.addLayout(button_layout)
+        left_layout.addLayout(button_layout)
+        
+        # ========== 右側圖表佈局 ==========
+        right_layout = QVBoxLayout()
+        
+        chart_title = QLabel("報到統計")
+        chart_title_font = QFont()
+        chart_title_font.setPointSize(12)
+        chart_title_font.setBold(True)
+        chart_title.setFont(chart_title_font)
+        right_layout.addWidget(chart_title)
+        
+        # 建立圓餅圖
+        self.chart_view = QChartView()
+        self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        right_layout.addWidget(self.chart_view)
+        
+        # ========== 組合左右布局 ==========
+        main_layout.addLayout(left_layout, 2)  # 左側佔 2 份
+        main_layout.addLayout(right_layout, 1)  # 右側佔 1 份
         
         self.setLayout(main_layout)
         
         # 初始化數據
         self.refresh_check_in_list()
     
+    def create_pie_chart(self, checked_in: int, not_checked_in: int):
+        """
+        建立圓餅圖表
+        
+        Args:
+            checked_in: 已報到人數
+            not_checked_in: 未報到人數
+        """
+        # 建立圖表
+        chart = QChart()
+        chart.setTitle("報到狀態分佈")
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        
+        # 建立圓餅圖數據
+        series = QPieSeries()
+        
+        if checked_in > 0:
+            slice_checked = QPieSlice("已報到", checked_in)
+            slice_checked.setColor(QColor(76, 175, 80))  # 綠色
+            slice_checked.setLabelVisible(True)
+            series.append(slice_checked)
+        
+        if not_checked_in > 0:
+            slice_not_checked = QPieSlice("未報到", not_checked_in)
+            slice_not_checked.setColor(QColor(244, 67, 54))  # 紅色
+            slice_not_checked.setLabelVisible(True)
+            series.append(slice_not_checked)
+        
+        if checked_in == 0 and not_checked_in == 0:
+            # 沒有數據時顯示提示
+            slice_empty = QPieSlice("暫無數據", 1)
+            slice_empty.setColor(QColor(200, 200, 200))  # 灰色
+            slice_empty.setLabelVisible(True)
+            series.append(slice_empty)
+        
+        chart.addSeries(series)
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
+        
+        self.chart_view.setChart(chart)
+    
     def process_check_in(self):
         """
-        處理報到 - 掃描結果與原始條碼做比對
+        處理報到 - 掃描戶號進行報到
         
         流程：
-        1. 清理掃描輸入（移除隱藏字符）
-        2. 與 .xlsx 原始條碼列做比對
-        3. 如果匹配 → 顯示對應戶號並報到
-        4. 如果不匹配 → 顯示錯誤
+        1. 清理掃描輸入
+        2. 查詢戶號
+        3. 執行報到
         """
-        # 【關鍵】清理掃描輸入 - 移除所有隱藏字符
-        raw_input = self.barcode_input.text()
-        scanned_barcode = clean_barcode_input(raw_input)
+        raw_input = self.barcode_input.text().strip()
         
-        # 調試輸出
-        if raw_input != scanned_barcode:
-            print_debug_info(raw_input, scanned_barcode)
-        
-        if not scanned_barcode:
-            QMessageBox.warning(self, "警告", "請掃描條碼")
-            return
-        
-        # 【關鍵】通過原始條碼查詢戶號
-        household_id = self.db.get_household_id_by_barcode(scanned_barcode)
-        
-        if not household_id:
-            QMessageBox.critical(
-                self, "錯誤", 
-                f"條碼 '{scanned_barcode}' 未找到對應戶號\n\n"
-                f"請檢查 .xlsx 文件中的原始條碼"
-            )
-            self.barcode_input.clear()
-            self.barcode_input.setFocus()
+        if not raw_input:
+            QMessageBox.warning(self, "警告", "請掃描或輸入戶號")
             return
         
         # 查找住戶
-        household = self.db.get_household(household_id)
+        household = self.db.get_household(raw_input)
         if not household:
             QMessageBox.critical(
                 self, "錯誤", 
-                f"戶號 {household_id} 不存在"
+                f"戶號 {raw_input} 不存在"
             )
             self.barcode_input.clear()
             self.barcode_input.setFocus()
             return
         
         # 檢查是否已報到
-        if self.is_household_checked_in(household_id):
-            # 重複報到 - 提醒但不執行
+        if self.is_household_checked_in(raw_input):
             QMessageBox.warning(
                 self, "重複報到", 
-                f"戶號 {household_id} 已報到\n\n請掃描下一筆資料"
+                f"戶號 {raw_input} 已報到\n\n請掃描下一筆資料"
             )
             self.barcode_input.clear()
             self.barcode_input.setFocus()
             return
         
         # 執行報到
-        if self.db.check_in_household(household_id):
-            # 正常報到 - 立即返回掃描區
-            self.last_checked_in_household_id = household_id
+        if self.db.check_in_household(raw_input):
+            self.last_checked_in_household_id = raw_input
             self.barcode_input.clear()
             self.barcode_input.setFocus()
             self.refresh_check_in_list()
         else:
-            # 報到失敗
             QMessageBox.critical(self, "錯誤", "報到失敗，請聯繫管理員")
             self.barcode_input.clear()
             self.barcode_input.setFocus()
@@ -254,13 +253,27 @@ class CheckInWindow(QWidget):
         return result is not None
     
     def refresh_check_in_list(self):
-        """刷新報到列表"""
+        """刷新報到列表和圖表"""
         # 更新統計信息
         stats = self.db.get_check_in_stats()
         if stats:
-            self.total_label.setText(f"預期出席: {stats.get('total_expected', 0)}")
-            self.checked_label.setText(f"已報到: {stats.get('checked_in', 0)}")
-            self.percentage_label.setText(f"出席率: {stats.get('percentage', 0)}%")
+            total = stats.get('total_expected', 0)
+            checked_in = stats.get('checked_in', 0)
+            percentage = stats.get('percentage', 0)
+            
+            self.total_label.setText(f"預期出席: {total}")
+            self.checked_label.setText(f"已報到: {checked_in}")
+            self.percentage_label.setText(f"出席率: {percentage}%")
+            
+            # 更新進度條
+            if total > 0:
+                self.progress_bar.setValue(int(percentage))
+            else:
+                self.progress_bar.setValue(0)
+            
+            # 更新圖表
+            not_checked_in = total - checked_in
+            self.create_pie_chart(checked_in, not_checked_in)
         
         # 更新表格
         self.check_in_table.setRowCount(0)
@@ -291,10 +304,6 @@ class CheckInWindow(QWidget):
             # 戶號
             household_id_item = QTableWidgetItem(household_id)
             
-            # 原始條碼
-            barcode = self.db.get_barcode_by_household_id(household_id)
-            barcode_item = QTableWidgetItem(barcode or "")
-            
             # 報到時間 - 只顯示時間部分 (HH:MM:SS)
             if row[1]:
                 try:
@@ -307,20 +316,18 @@ class CheckInWindow(QWidget):
             time_item = QTableWidgetItem(checked_in_at)
             
             # 狀態 - 已報到 或 尚未報到
-            status = "已報到" if row[1] else "尚未報到"
+            status = "✓ 已報到" if row[1] else "⊗ 尚未報到"
             status_item = QTableWidgetItem(status)
             
             # 如果是最後一筆報到資料，設置黃色背景
             if household_id == self.last_checked_in_household_id:
                 household_id_item.setBackground(yellow_brush)
-                barcode_item.setBackground(yellow_brush)
                 time_item.setBackground(yellow_brush)
                 status_item.setBackground(yellow_brush)
             
             self.check_in_table.setItem(row_position, 0, household_id_item)
-            self.check_in_table.setItem(row_position, 1, barcode_item)
-            self.check_in_table.setItem(row_position, 2, time_item)
-            self.check_in_table.setItem(row_position, 3, status_item)
+            self.check_in_table.setItem(row_position, 1, time_item)
+            self.check_in_table.setItem(row_position, 2, status_item)
     
     def export_check_in_data(self):
         """導出報到數據"""
