@@ -460,7 +460,7 @@ class VotingWindow(QWidget):
     def _update_progress_bar(self):
         """更新頂部進度條為當前選中案的進度"""
         total_households = len(self.checked_in_households)
-        if not self.voting_items or self.current_case_idx >= len(self.voting_items):
+        if not self.voting_items or self.current_case_idx < 0 or self.current_case_idx >= len(self.voting_items):
             self.progress_bar.setValue(0)
             self.progress_label.setText("投票進度: 0 / 0")
             return
