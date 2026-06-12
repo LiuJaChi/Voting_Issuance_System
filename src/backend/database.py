@@ -1,5 +1,9 @@
 """
 數據庫管理模塊 - 支持住戶面積（持分）
+
+新增投票項目管理功能：
+  - 投票種類（重大議案 / 一般議案）
+  - 通過百分比（自定義 50% ~ 100%）
 """
 import sqlite3
 import json
@@ -63,12 +67,15 @@ class Database:
         """)
 
         # 投票項目表（以案號為唯一標識）
+        # 新增：vote_type（投票種類）、pass_percentage（通過百分比）
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS voting_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 case_number TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT,
+                vote_type TEXT DEFAULT '一般議案',
+                pass_percentage REAL DEFAULT 66.7,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -99,13 +106,29 @@ class Database:
 
         conn.commit()
         
-        # 檢查是否需要添加 share_amount 欄位（用於數據庫升級）
+        # 檢查是否需要添加新欄位（用於數據庫升級）
         cursor.execute("PRAGMA table_info(households)")
         columns = [column[1] for column in cursor.fetchall()]
         
         if 'share_amount' not in columns:
             cursor.execute("""
                 ALTER TABLE households ADD COLUMN share_amount REAL DEFAULT 0.0
+            """)
+            conn.commit()
+        
+        # 檢查 voting_items 表是否需要添加新欄位
+        cursor.execute("PRAGMA table_info(voting_items)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'vote_type' not in columns:
+            cursor.execute("""
+                ALTER TABLE voting_items ADD COLUMN vote_type TEXT DEFAULT '一般議案'
+            """)
+            conn.commit()
+        
+        if 'pass_percentage' not in columns:
+            cursor.execute("""
+                ALTER TABLE voting_items ADD COLUMN pass_percentage REAL DEFAULT 66.7
             """)
             conn.commit()
         
@@ -330,20 +353,39 @@ class Database:
 
     # ─────────────────────────── 投票項目管理 ───────────────────────────
 
-    def add_voting_item(self, case_number: str, name: str, description: str = None) -> bool:
+    def add_voting_item(self, case_number: str, name: str, description: str = None,
+                       vote_type: str = '一般議案', pass_percentage: float = 66.7) -> bool:
         """新增投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT INTO voting_items (case_number, name, description)
-                VALUES (?, ?, ?)
-            """, (case_number, name, description))
+                INSERT INTO voting_items (case_number, name, description, vote_type, pass_percentage)
+                VALUES (?, ?, ?, ?, ?)
+            """, (case_number, name, description, vote_type, pass_percentage))
             conn.commit()
             conn.close()
             return True
         except sqlite3.IntegrityError:
             conn.close()
+            return False
+
+    def update_voting_item(self, case_number: str, name: str, description: str,
+                          vote_type: str, pass_percentage: float) -> bool:
+        """更新投票項目"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                UPDATE voting_items SET name = ?, description = ?, vote_type = ?, pass_percentage = ?
+                WHERE case_number = ?
+            """, (name, description, vote_type, pass_percentage, case_number))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            conn.close()
+            print(f"更新投票項目失敗: {e}")
             return False
 
     def delete_voting_item(self, case_number: str) -> bool:
@@ -421,7 +463,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT name FROM voting_items WHERE case_number = ?", (case_number,))
+        cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
         item = cursor.fetchone()
         if not item:
             conn.close()
@@ -437,7 +479,13 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
 
-        result = {'case_number': case_number, 'item_name': item['name'], 'votes': {}}
+        result = {
+            'case_number': case_number,
+            'item_name': item['name'],
+            'vote_type': item['vote_type'],
+            'pass_percentage': item['pass_percentage'],
+            'votes': {}
+        }
         total = 0
         for row in rows:
             result['votes'][row['vote']] = row['count']
