@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QSpinBox, QDoubleSpinBox, QPushButton, QFormLayout, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 
 from src.backend.config_manager import ConfigManager
 from src.backend.database import Database
@@ -13,6 +13,9 @@ from src.backend.database import Database
 
 class SetupDialog(QDialog):
     """系統設置對話框"""
+    
+    # 設置變更信號
+    settings_changed = pyqtSignal()
     
     def __init__(self, parent=None):
         """初始化系統設置對話框"""
@@ -101,14 +104,23 @@ class SetupDialog(QDialog):
             'language': self.config_manager.get_config('language', 'zh_TW')
         }
         
-        if self.config_manager.save_config(config):
-            # 同時保存到數據庫
-            self.db.save_config(
-                config['system_name'],
-                config['total_participants'],
-                config['pass_percentage']
-            )
-            QMessageBox.information(self, "成功", "配置已保存")
-            self.accept()
-        else:
-            QMessageBox.critical(self, "錯誤", "配置保存失敗")
+        try:
+            if self.config_manager.save_config(config):
+                # 同時保存到數據庫
+                self.db.save_config(
+                    config['system_name'],
+                    config['total_participants'],
+                    config['pass_percentage']
+                )
+                
+                QMessageBox.information(self, "成功", "配置已保存")
+                
+                # 發出設置變更信號
+                self.settings_changed.emit()
+                print("✓ 設置變更信號已發送")
+                
+                self.accept()
+            else:
+                QMessageBox.critical(self, "錯誤", "配置保存失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"配置保存失敗: {e}")
