@@ -47,103 +47,56 @@ class VotingBallotPrinter:
         self.temp_barcode_dir = os.path.join(output_dir, ".temp_barcodes")
         Path(self.temp_barcode_dir).mkdir(parents=True, exist_ok=True)
         
-        # 初始化繁體中文字體
         self._init_chinese_fonts()
 
     def _init_chinese_fonts(self):
         """初始化繁體中文字體支持"""
         try:
-            # 常見繁體中文字體路徑
+            # 嘗試註冊中文字體
             font_paths = [
-                # Windows 路徑
-                "C:\\Windows\\Fonts\\msjh.ttc",  # 微軟正黑體
-                "C:\\Windows\\Fonts\\kaiu.ttf",  # 標楷體
-                # macOS 路徑
-                "/Library/Fonts/Kaiti.ttc",
-                "/Library/Fonts/PingFang.ttc",
-                # Linux 路徑
-                "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-                "/usr/share/fonts/truetype/droid/DroidSansFallback.ttf",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
+                "/System/Library/Fonts/STHeiti Medium.ttf",  # macOS
+                "C:\\Windows\\Fonts\\kaiu.ttf",  # Windows (標楷體)
+                "C:\\Windows\\Fonts\\msyh.ttf",  # Windows (微軟雅黑)
             ]
             
-            font_found = False
             for font_path in font_paths:
                 if os.path.exists(font_path):
-                    try:
-                        # 嘗試註冊字體
-                        font_name = os.path.basename(font_path).replace('.ttc', '').replace('.ttf', '')
-                        pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
-                        pdfmetrics.registerFont(TTFont('ChineseFontBold', font_path))
-                        print(f"✓ 繁體中文字體已加載: {font_path}")
-                        font_found = True
-                        break
-                    except Exception as e:
-                        print(f"嘗試加載字體失敗 {font_path}: {e}")
-                        continue
-            
-            if not font_found:
-                print("⚠ 未找到繁體中文字體，將使用默認字體")
-                
+                    pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+                    pdfmetrics.registerFont(TTFont('ChineseFontBold', font_path))
+                    break
         except Exception as e:
-            print(f"初始化中文字體失敗: {e}")
+            print(f"⚠ 中文字體初始化失敗: {e}，將使用默認字體")
 
     def _cleanup_temp_barcode_dir(self):
         """清理臨時條碼目錄"""
         try:
             if os.path.exists(self.temp_barcode_dir):
                 shutil.rmtree(self.temp_barcode_dir)
-                print(f"✓ 臨時條碼目錄已清理: {self.temp_barcode_dir}")
         except Exception as e:
-            print(f"清理臨時條碼目錄失敗: {e}")
+            print(f"⚠ 清理臨時文件失敗: {e}")
 
     def _generate_code128_image(self, content: str) -> str:
         """
-        生成 Code128 條碼圖片，返回文件路徑
+        生成 Code128 條碼圖像
         
         Args:
-            content: Code128 內容（例如 A106-02）
+            content: 條碼內容
             
         Returns:
-            條碼圖像文件路徑
+            條碼圖像路徑
         """
         try:
-            # 確保內容適合作為文件名
-            safe_content = content.replace('/', '_').replace('\\', '_').replace('-', '_')
-            temp_filename = f"barcode_{safe_content}"
-            temp_path = os.path.join(self.temp_barcode_dir, temp_filename)
+            output_path = os.path.join(self.temp_barcode_dir, f"{content}.png")
             
-            print(f"📝 開始生成條碼: {content}")
+            # 生成 Code128 條碼
+            ean = barcode.get('code128', content, writer=ImageWriter())
+            ean.save(output_path.replace('.png', ''))
             
-            # 使用 python-barcode 生成 Code128 條碼
-            code128_class = barcode.get_barcode_class('code128')
-            writer = ImageWriter()
-            
-            # 生成條碼實例
-            bar = code128_class(content, writer=writer)
-            
-            # 條碼配置選項 - 簡化版本，避免字體渲染問題
-            options = {
-                'module_width': 0.5,       # 條碼條的寬度（較小以適應投票單空間）
-                'module_height': 10.0,     # 條碼的高度
-                'quiet_zone': 2.0,         # 靜區寬度
-                'write_text': False,       # 不寫入文字，避免字體初始化問題
-            }
-            
-            # 保存條碼圖像到文件
-            actual_path = bar.save(temp_path, options=options)
-            
-            # 驗證文件是否存在
-            if os.path.exists(actual_path):
-                print(f"✓ Code128 條碼生成成功: {content}")
-                return actual_path
-            else:
-                raise FileNotFoundError(f"條碼文件未生成: {actual_path}")
-            
+            return output_path
         except Exception as e:
-            print(f"✗ Code128 條碼生成失敗 {content}: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+            print(f"⚠ 生成條碼失敗 ({content}): {e}")
+            return None
 
     def generate_pdf(
         self,
@@ -205,10 +158,10 @@ class VotingBallotPrinter:
             'CaseNumber',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=11,
-            leading=12,
+            fontSize=14,
+            leading=16,
             fontName=font_bold_name,
-            textColor=colors.black,
+            textColor=colors.darkblue,
         )
         
         # 項目名稱樣式
@@ -218,8 +171,8 @@ class VotingBallotPrinter:
             alignment=TA_CENTER,
             fontSize=9,
             leading=10,
-            fontName=font_bold_name,
-            textColor=colors.black,
+            fontName=font_name,
+            textColor=colors.darkblue,
         )
         
         # 投票種類樣式
@@ -227,8 +180,8 @@ class VotingBallotPrinter:
             'VoteType',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=8,
-            leading=9,
+            fontSize=7,
+            leading=8,
             fontName=font_name,
             textColor=colors.darkblue,
         )
@@ -244,15 +197,15 @@ class VotingBallotPrinter:
             textColor=colors.black,
         )
         
-        # 投票選項樣式
+        # 投票選項樣式 - 放大字體從 6pt 改為 12pt
         voting_option_style = ParagraphStyle(
             'VotingOption',
             parent=styles['Normal'],
             alignment=TA_CENTER,
-            fontSize=6,
-            leading=7,
-            fontName=font_name,
-            textColor=colors.black,
+            fontSize=12,
+            leading=14,
+            fontName=font_bold_name,
+            textColor=colors.darkred,
         )
 
         # 每個標籤的寬度
@@ -275,17 +228,16 @@ class VotingBallotPrinter:
             
             print(f"\n📋 處理投票案號 {case_idx + 1}/{len(voting_data)}: 第{case_number}案 {case_name}")
             
-            # 遍歷每個住戶生成投票單
-            for hh_idx, household in enumerate(households):
+            # 遍歷每個住戶
+            for household_idx, household in enumerate(households):
                 household_id = household['household_id']
-                print(f"  🏠 生成投票單 {hh_idx + 1}/{len(households)}: {household_id}")
                 
-                # 生成 Code128 條碼圖像
-                try:
-                    code128_path = self._generate_code128_image(household_id)
-                    code128_img = RLImage(code128_path, width=cell_w * 0.8, height=8 * mm)
-                except Exception as e:
-                    print(f"❌ 條碼生成失敗 {household_id}: {e}")
+                # 生成條碼
+                barcode_path = self._generate_code128_image(household_id)
+                
+                if barcode_path and os.path.exists(barcode_path):
+                    code128_img = RLImage(barcode_path, width=7 * mm, height=4 * mm)
+                else:
                     code128_img = Paragraph(f"Error: {household_id}", item_name_style)
                 
                 # 構建投票單內容
@@ -304,14 +256,14 @@ class VotingBallotPrinter:
                     [code128_img],
                     # 住戶條碼下方顯示戶號
                     [Paragraph(household_id, voting_option_style)],
-                    # 投票選項
-                    [Paragraph("□同意  □不同意  □棄權", voting_option_style)],
+                    # 投票選項 - 放大字體
+                    [Paragraph("□ 同意  □ 不同意  □ 棄權", voting_option_style)],
                 ]
                 
                 ballot_content_table = Table(
                     ballot_content_data,
                     colWidths=[cell_w * 0.95],
-                    rowHeights=[6 * mm, 7 * mm, 5 * mm, 6 * mm, 1 * mm, 8 * mm, 4 * mm, 5 * mm],
+                    rowHeights=[6 * mm, 7 * mm, 5 * mm, 6 * mm, 1 * mm, 8 * mm, 4 * mm, 6 * mm],
                 )
                 ballot_content_table.setStyle(TableStyle([
                     ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
@@ -358,7 +310,7 @@ class VotingBallotPrinter:
         print(f"\n📄 開始生成 PDF: {output_path}")
         doc.build([table])
         print(f"✓ PDF 生成完成: {output_path}")
-        
+
         # PDF 已生成完成，現在可以安全地清理臨時條碼文件
         self._cleanup_temp_barcode_dir()
         
