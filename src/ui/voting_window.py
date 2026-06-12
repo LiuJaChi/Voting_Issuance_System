@@ -24,7 +24,8 @@ class VotingWindow(QWidget):
         
         # 投票流程狀態
         self.voting_items = []
-        self.checked_in_households = []
+        self.all_households = []
+        self.checked_in_households = {}  # 戶號 -> 報到記錄
         self.current_case_idx = 0
         self.selected_vote_option = None
         
@@ -197,22 +198,41 @@ class VotingWindow(QWidget):
     def load_checked_in_households(self):
         """載入已報到的住戶資料"""
         try:
-            # 從數據庫獲取已報到的住戶
-            self.checked_in_households = self.db.get_all_households_with_checkin_status()
+            # 從數據庫獲取所有住戶
+            self.all_households = self.db.get_all_households()
             
-            if not self.checked_in_households:
-                QMessageBox.warning(self, "警告", "沒有已報到的住戶資料\n\n請先在報到管理中報到住戶")
+            if not self.all_households:
+                QMessageBox.warning(self, "警告", "沒有住戶資料\n\n請先在住戶管理中導入住戶")
                 return
             
-            checked_in_count = sum(1 for h in self.checked_in_households if h.get('checked_in', False))
-            self.household_count_label.setText(f"已載入: {checked_in_count} / {len(self.checked_in_households)} 戶")
+            # 獲取報到統計
+            check_in_stats = self.db.get_check_in_stats()
+            checked_in_count = check_in_stats['checked_in']
+            total_count = check_in_stats['total_expected']
+            
+            # 建立報到戶號映射表（用於快速查詢）
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT household_id FROM check_in_records
+            """)
+            checked_in_records = cursor.fetchall()
+            conn.close()
+            
+            self.checked_in_households = {row['household_id'] for row in checked_in_records}
+            
+            self.household_count_label.setText(
+                f"已載入: {checked_in_count} / {total_count} 戶"
+            )
             
             # 載入投票項目
             self.load_voting_items()
             
             QMessageBox.information(
                 self, "成功",
-                f"已載入 {len(self.checked_in_households)} 戶住戶資料\n\n其中報到: {checked_in_count} 戶"
+                f"已載入 {total_count} 戶住戶資料\n\n"
+                f"已報到: {checked_in_count} 戶\n"
+                f"未報到: {total_count - checked_in_count} 戶"
             )
             
         except Exception as e:
@@ -277,7 +297,7 @@ class VotingWindow(QWidget):
     def process_vote(self):
         """處理投票"""
         # 檢查投票前置條件
-        if not self.checked_in_households:
+        if not self.all_households:
             QMessageBox.warning(self, "警告", "請先載入已報到的住戶資料")
             return
         
@@ -310,7 +330,7 @@ class VotingWindow(QWidget):
                 return
             
             # 檢查是否已報到
-            is_checked_in = household.get('checked_in', False)
+            is_checked_in = household_id in self.checked_in_households
             if not is_checked_in:
                 self.vote_message_label.setText(f"⚠ 戶號 {household_id} 未報到")
                 self.vote_message_label.setStyleSheet("color: #FF9800; font-weight: bold;")
@@ -366,9 +386,9 @@ class VotingWindow(QWidget):
                 # 獲取投票結果
                 results = self.db.get_voting_results(case_number)
                 
-                agree_count = results.get('同意', 0)
-                disagree_count = results.get('不同意', 0)
-                abstain_count = results.get('棄權', 0)
+                agree_count = results.get('votes', {}).get('同意', 0)
+                disagree_count = results.get('votes', {}).get('不同意', 0)
+                abstain_count = results.get('votes', {}).get('棄權', 0)
                 
                 total_count = agree_count + disagree_count + abstain_count
                 total_voted = max(total_voted, total_count)
