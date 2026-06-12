@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from src.backend.database import Database
+from src.backend.config_manager import ConfigManager
 from src.backend.data_merger import DataMerger
 import json
 
@@ -21,6 +22,7 @@ class ResultsWindow(QWidget):
         """初始化結果統計窗口"""
         super().__init__(parent)
         self.db = Database()
+        self.config_manager = ConfigManager()
         
         self.init_ui()
     
@@ -36,15 +38,32 @@ class ResultsWindow(QWidget):
         title.setFont(title_font)
         main_layout.addWidget(title)
         
-        # 結果表
+        # 結果表格
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(6)
-        self.results_table.setHorizontalHeaderLabels(
-            ["項目", "贊成", "反對", "總計", "贊成率(%)", "是否通過"]
-        )
+        self.results_table.setHorizontalHeaderLabels([
+            "投票項目", "贊成票", "反對票", "投票人數", "贊成率(%)", "結果"
+        ])
+        
         self.results_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.ResizeToContents
+        )
+        
         main_layout.addWidget(self.results_table)
         
         # 按鈕佈局
@@ -58,7 +77,7 @@ class ResultsWindow(QWidget):
         merge_button.clicked.connect(self.merge_device_data)
         button_layout.addWidget(merge_button)
         
-        export_button = QPushButton("導出結果報告")
+        export_button = QPushButton("導出結果")
         export_button.clicked.connect(self.export_results)
         button_layout.addWidget(export_button)
         
@@ -67,42 +86,36 @@ class ResultsWindow(QWidget):
         
         self.setLayout(main_layout)
         
-        # 初始化數據
         self.refresh_results()
     
     def refresh_results(self):
         """刷新投票結果"""
         self.results_table.setRowCount(0)
         
-        config = self.db.get_config()
-        if not config:
-            QMessageBox.warning(self, "警告", "請先進行系統設置")
-            return
-        
-        pass_percentage = config['pass_percentage']
+        # 從配置管理器獲取通過百分比
+        pass_percentage = self.config_manager.get_config('pass_percentage', 66.7)
         
         # 獲取所有投票項目
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
+        voting_items = self.db.get_all_voting_items()
         
-        cursor.execute("SELECT id, name FROM voting_items")
-        voting_items = cursor.fetchall()
-        conn.close()
+        if not voting_items:
+            QMessageBox.warning(self, "警告", "沒有投票項目資料")
+            return
         
         row_idx = 0
         for item in voting_items:
-            item_id = item[0]
-            item_name = item[1]
+            case_number = item['case_number']
+            item_name = item['name']
             
             # 獲取投票結果
-            results = self.db.get_voting_results(item_id)
+            results = self.db.get_voting_results(case_number)
             
-            yes_count = results.get('votes', {}).get('yes', 0)
-            no_count = results.get('votes', {}).get('no', 0)
+            yes_count = results.get('yes', 0)
+            no_count = results.get('no', 0)
             total = yes_count + no_count
             
             yes_percentage = (yes_count / total * 100) if total > 0 else 0
-            passed = "通過" if yes_percentage >= pass_percentage else "未通過"
+            passed = "✓ 通過" if yes_percentage >= pass_percentage else "✗ 未通過"
             
             self.results_table.insertRow(row_idx)
             self.results_table.setItem(row_idx, 0, QTableWidgetItem(item_name))
@@ -126,13 +139,12 @@ class ResultsWindow(QWidget):
         
         # 合併數據
         if DataMerger.merge_export_files(file_paths):
-            # 加載合併後的數據
             try:
                 with open("exports/merged_data.json", 'r', encoding='utf-8') as f:
                     merged_data = json.load(f)
                 
-                config = self.db.get_config()
-                pass_percentage = config['pass_percentage'] if config else 66.7
+                # 獲取通過百分比
+                pass_percentage = self.config_manager.get_config('pass_percentage', 66.7)
                 
                 # 計算結果
                 results = DataMerger.calculate_voting_results(merged_data, pass_percentage)
@@ -156,4 +168,4 @@ class ResultsWindow(QWidget):
         if self.db.export_data():
             QMessageBox.information(self, "成功", "結果已導出到 exports/data.json")
         else:
-            QMessageBox.critical(self, "錯誤", "導出失敗")
+            QMessageBox.critical(self, "錯誤", "結果導出失敗")
