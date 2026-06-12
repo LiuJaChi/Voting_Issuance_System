@@ -79,19 +79,19 @@ class VotingWindow(QWidget):
         self.vote_button_group = QButtonGroup()
         
         agree_radio = QRadioButton("✓ 同意")
-        agree_radio.setStyleSheet("QRadioButton { font-size: 11pt; }")
+        agree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
         self.vote_button_group.addButton(agree_radio, 0)
         agree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "同意"))
         option_layout.addWidget(agree_radio)
         
         disagree_radio = QRadioButton("✗ 不同意")
-        disagree_radio.setStyleSheet("QRadioButton { font-size: 11pt; }")
+        disagree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
         self.vote_button_group.addButton(disagree_radio, 1)
         disagree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "不同意"))
         option_layout.addWidget(disagree_radio)
         
         abstain_radio = QRadioButton("⊘ 棄權")
-        abstain_radio.setStyleSheet("QRadioButton { font-size: 11pt; }")
+        abstain_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
         self.vote_button_group.addButton(abstain_radio, 2)
         abstain_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "棄權"))
         option_layout.addWidget(abstain_radio)
@@ -402,14 +402,17 @@ class VotingWindow(QWidget):
                 agree_item = QTableWidgetItem(str(agree_count))
                 agree_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 agree_item.setBackground(QColor("#C8E6C9"))
+                agree_item.setForeground(QColor("black"))
                 
                 disagree_item = QTableWidgetItem(str(disagree_count))
                 disagree_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 disagree_item.setBackground(QColor("#FFCDD2"))
+                disagree_item.setForeground(QColor("black"))
                 
                 abstain_item = QTableWidgetItem(str(abstain_count))
                 abstain_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 abstain_item.setBackground(QColor("#FFF9C4"))
+                abstain_item.setForeground(QColor("black"))
                 
                 self.vote_stats_table.setItem(row_idx, 0, case_num_item)
                 self.vote_stats_table.setItem(row_idx, 1, case_name_item)
@@ -462,6 +465,7 @@ class VotingWindow(QWidget):
                 vote_option = vote['vote']
                 vote_item = QTableWidgetItem(vote_option)
                 vote_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                vote_item.setForeground(QColor("black"))
                 
                 # 根據投票選項著色
                 if vote_option == "同意":
