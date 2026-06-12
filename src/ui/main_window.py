@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QTabWidget, QMessageBox, QMenuBar, QMenu,
     QFileDialog, QInputDialog
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon, QFont
 
 from src.backend.database import Database
@@ -23,17 +23,32 @@ from src.ui.household_manager_dialog import HouseholdManagerDialog
 
 class MainWindow(QMainWindow):
     """主應用窗口"""
+    
+    # 設置變更信號
+    settings_changed = pyqtSignal()
 
     def __init__(self):
         """初始化主窗口"""
         super().__init__()
-        self.setWindowTitle("投票系統 v2.0.0")
-        self.setGeometry(100, 100, 1200, 800)
-
+        
         self.db = Database()
         self.config_manager = ConfigManager()
+        
+        # 初始化窗口標題（從配置讀取）
+        self.update_window_title()
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # 存儲標題標籤以便後續更新
+        self.title_label = None
 
         self.init_ui()
+
+    def update_window_title(self):
+        """從配置更新窗口標題"""
+        system_name = self.config_manager.get_config('system_name', '投票系統')
+        version = "v2.0.0"
+        self.setWindowTitle(f"{system_name} {version}")
+        print(f"✓ 窗口標題已更新: {system_name} {version}")
 
     def init_ui(self):
         """初始化用戶界面"""
@@ -44,13 +59,15 @@ class MainWindow(QMainWindow):
 
         main_layout = QVBoxLayout()
 
-        title = QLabel("投票系統")
+        # 標題 - 從配置讀取系統名稱
+        system_name = self.config_manager.get_config('system_name', '投票系統')
+        self.title_label = QLabel(system_name)
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
-        title.setFont(title_font)
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(title)
+        self.title_label.setFont(title_font)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.title_label)
 
         tabs = QTabWidget()
 
@@ -119,7 +136,24 @@ class MainWindow(QMainWindow):
     def open_setup_dialog(self):
         """打開系統設置對話框"""
         dialog = SetupDialog(self)
+        
+        # 連接設置變更信號
+        dialog.settings_changed.connect(self.on_settings_changed)
+        
         dialog.exec()
+
+    def on_settings_changed(self):
+        """設置變更回調 - 更新窗口標題和內容"""
+        print("⚙️ 檢測到設置變更，正在更新窗口...")
+        
+        # 更新窗口標題
+        self.update_window_title()
+        
+        # 更新標題標籤
+        if self.title_label:
+            system_name = self.config_manager.get_config('system_name', '投票系統')
+            self.title_label.setText(system_name)
+            print(f"✓ UI 標題已更新: {system_name}")
 
     def manage_households(self):
         """管理住戶"""
