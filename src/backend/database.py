@@ -510,6 +510,65 @@ class Database:
         result['total'] = total
         return result
 
+    def get_voting_results_with_area(self, case_number: str) -> Dict:
+        """獲取某案號的投票結果並包含坪數統計"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # 獲取投票項目信息
+        cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
+        item = cursor.fetchone()
+        if not item:
+            conn.close()
+            return {}
+
+        # 計算總坪數
+        cursor.execute("SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households")
+        total_area = cursor.fetchone()['total_area']
+
+        # 計算各選項的票數和坪數
+        cursor.execute("""
+            SELECT vote, COUNT(*) as count, COALESCE(SUM(h.share_amount), 0) as area
+            FROM votes v
+            JOIN households h ON v.household_id = h.household_id
+            WHERE v.case_number = ?
+            GROUP BY v.vote
+        """, (case_number,))
+
+        rows = cursor.fetchall()
+
+        result = {
+            'case_number': case_number,
+            'item_name': item['name'],
+            'total_area': total_area,
+            'votes': {},
+            'areas': {}
+        }
+        
+        total_votes = 0
+        total_voted_area = 0
+        
+        for row in rows:
+            vote_option = row['vote']
+            count = row['count']
+            area = row['area']
+            
+            result['votes'][vote_option] = count
+            result['areas'][vote_option] = area
+            
+            total_votes += count
+            total_voted_area += area
+
+        result['total_votes'] = total_votes
+        result['total_voted_area'] = total_voted_area
+
+        # 計算贊成票的坪數
+        result['agree_area'] = result['areas'].get('同意', 0)
+        result['agree_votes'] = result['votes'].get('同意', 0)
+
+        conn.close()
+        return result
+
     def get_all_voting_results(self) -> List[Dict]:
         """獲取所有投票項目的結果"""
         items = self.get_all_voting_items()
@@ -565,9 +624,11 @@ class Database:
                        v.case_number,
                        vi.name AS case_name,
                        v.vote,
-                       v.voted_at
+                       v.voted_at,
+                       h.share_amount
                 FROM votes v
                 LEFT JOIN voting_items vi ON v.case_number = vi.case_number
+                LEFT JOIN households h ON v.household_id = h.household_id
                 ORDER BY v.case_number, v.household_id
             """)
             votes = [dict(row) for row in cursor.fetchall()]
@@ -588,9 +649,10 @@ class Database:
             ws.column_dimensions['C'].width = 20
             ws.column_dimensions['D'].width = 10
             ws.column_dimensions['E'].width = 20
+            ws.column_dimensions['F'].width = 12
 
             # 添加表頭
-            headers = ['戶號', '案號', '項目名稱', '投票選項', '投票時間']
+            headers = ['戶號', '案號', '項目名稱', '投票選項', '投票時間', '坪數']
             for col_num, header in enumerate(headers, 1):
                 cell = ws.cell(row=1, column=col_num)
                 cell.value = header
@@ -606,9 +668,10 @@ class Database:
                 ws.cell(row=row_num, column=3).value = vote.get('case_name', '')
                 ws.cell(row=row_num, column=4).value = vote['vote']
                 ws.cell(row=row_num, column=5).value = self._fmt_timestamp(vote['voted_at'])
+                ws.cell(row=row_num, column=6).value = vote.get('share_amount', 0)
 
                 # 應用邊框
-                for col in range(1, 6):
+                for col in range(1, 7):
                     ws.cell(row=row_num, column=col).border = self._get_border()
                     ws.cell(row=row_num, column=col).alignment = Alignment(
                         horizontal="center", vertical="center"
