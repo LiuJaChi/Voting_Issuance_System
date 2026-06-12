@@ -67,7 +67,7 @@ class VotingWindow(QWidget):
         
         # 項目詳情顯示
         self.case_info_label = QLabel("請先載入住戶資料並選擇投票項目")
-        self.case_info_label.setStyleSheet("color: #666; font-size: 9pt;")
+        self.case_info_label.setStyleSheet("color: #FFF; font-size: 9pt;")
         vote_setup_layout.addWidget(self.case_info_label)
         
         vote_setup_layout.addSpacing(10)
@@ -79,19 +79,19 @@ class VotingWindow(QWidget):
         self.vote_button_group = QButtonGroup()
         
         agree_radio = QRadioButton("✓ 同意")
-        agree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
+        agree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: white; }")
         self.vote_button_group.addButton(agree_radio, 0)
         agree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "同意"))
         option_layout.addWidget(agree_radio)
         
         disagree_radio = QRadioButton("✗ 不同意")
-        disagree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
+        disagree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color:white; }")
         self.vote_button_group.addButton(disagree_radio, 1)
         disagree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "不同意"))
         option_layout.addWidget(disagree_radio)
         
         abstain_radio = QRadioButton("⊘ 棄權")
-        abstain_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: black; }")
+        abstain_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: white; }")
         self.vote_button_group.addButton(abstain_radio, 2)
         abstain_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "棄權"))
         option_layout.addWidget(abstain_radio)
@@ -144,7 +144,7 @@ class VotingWindow(QWidget):
         main_layout.addWidget(barcode_group)
         
         # ═══════════════════════════ 4. 投票統計 ═══════════════════════════
-        stats_group = QGroupBox("4️⃣ 投票統計")
+        stats_group = QGroupBox("4️⃣ 投票統計（含面積坪數）")
         stats_layout = QVBoxLayout()
         
         # 投票進度
@@ -157,11 +157,12 @@ class VotingWindow(QWidget):
         self.progress_bar.setValue(0)
         stats_layout.addWidget(self.progress_bar)
         
-        # 投票結果表
+        # 投票結果表 - 新增面積(坪)列
         self.vote_stats_table = QTableWidget()
-        self.vote_stats_table.setColumnCount(6)
+        self.vote_stats_table.setColumnCount(9)
         self.vote_stats_table.setHorizontalHeaderLabels(
-            ["案號", "項目名稱", "同意", "不同意", "棄權", "進度"]
+            ["案號", "項目名稱", "同意", "不同意", "棄權", 
+             "同意坪數", "不同意坪數", "棄權坪數", "進度"]
         )
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -169,6 +170,9 @@ class VotingWindow(QWidget):
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.vote_stats_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.vote_stats_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        self.vote_stats_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
         stats_layout.addWidget(self.vote_stats_table)
         
         # 匯出 / 匯入按鈕列
@@ -413,7 +417,7 @@ class VotingWindow(QWidget):
             self.vote_message_label.setStyleSheet("color: #F44336; font-weight: bold;")
     
     def refresh_vote_stats(self):
-        """刷新投票統計"""
+        """刷新投票統計 - 包含面積(坪)數據"""
         try:
             self.vote_stats_table.setRowCount(0)
             
@@ -436,6 +440,11 @@ class VotingWindow(QWidget):
                 abstain_count = results.get('votes', {}).get('棄權', 0)
                 
                 total_count = agree_count + disagree_count + abstain_count
+                
+                # 獲取各選項的面積(坪)數據
+                agree_area = self.db.get_voting_area_by_vote(case_number, '同意')
+                disagree_area = self.db.get_voting_area_by_vote(case_number, '不同意')
+                abstain_area = self.db.get_voting_area_by_vote(case_number, '棄權')
                 
                 # 計算該案件的進度百分比
                 case_progress = int((total_count / total_households) * 100) if total_households > 0 else 0
@@ -461,7 +470,23 @@ class VotingWindow(QWidget):
                 abstain_item.setBackground(QColor("#FFF9C4"))
                 abstain_item.setForeground(QColor("black"))
                 
-                # 新增進度列
+                # 面積(坪)列
+                agree_area_item = QTableWidgetItem(f"{agree_area:.2f}")
+                agree_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                agree_area_item.setBackground(QColor("#C8E6C9"))
+                agree_area_item.setForeground(QColor("black"))
+                
+                disagree_area_item = QTableWidgetItem(f"{disagree_area:.2f}")
+                disagree_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                disagree_area_item.setBackground(QColor("#FFCDD2"))
+                disagree_area_item.setForeground(QColor("black"))
+                
+                abstain_area_item = QTableWidgetItem(f"{abstain_area:.2f}")
+                abstain_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                abstain_area_item.setBackground(QColor("#FFF9C4"))
+                abstain_area_item.setForeground(QColor("black"))
+                
+                # 進度列
                 progress_item = QTableWidgetItem(f"{case_progress}%")
                 progress_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 progress_item.setForeground(QColor("black"))
@@ -477,7 +502,10 @@ class VotingWindow(QWidget):
                 self.vote_stats_table.setItem(row_idx, 2, agree_item)
                 self.vote_stats_table.setItem(row_idx, 3, disagree_item)
                 self.vote_stats_table.setItem(row_idx, 4, abstain_item)
-                self.vote_stats_table.setItem(row_idx, 5, progress_item)
+                self.vote_stats_table.setItem(row_idx, 5, agree_area_item)
+                self.vote_stats_table.setItem(row_idx, 6, disagree_area_item)
+                self.vote_stats_table.setItem(row_idx, 7, abstain_area_item)
+                self.vote_stats_table.setItem(row_idx, 8, progress_item)
             
             # 刷新已投票列表
             self.refresh_voted_list()
@@ -522,219 +550,117 @@ class VotingWindow(QWidget):
         try:
             # 清空現有標籤
             while self.voted_labels_layout.count() > 1:
-                widget = self.voted_labels_layout.takeAt(0).widget()
-                if widget:
-                    widget.deleteLater()
+                item = self.voted_labels_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
             
+            # 獲取當前案件已投票的住戶
             if not self.voting_items or self.current_case_idx >= len(self.voting_items):
                 return
             
             case = self.voting_items[self.current_case_idx]
             case_number = case['case_number']
             
-            # 從數據庫獲取投票記錄
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT v.household_id, v.vote
-                FROM votes v
-                WHERE v.case_number = ?
-                ORDER BY v.voted_at DESC
-                LIMIT 50
-            """, (case_number,))
-            votes = cursor.fetchall()
-            conn.close()
+            # 獲取該案件的所有投票記錄
+            votes = self.db.get_all_votes_for_case(case_number)
             
-            # 定義投票選項顏色對應
-            vote_colors = {
-                '同意': QColor(144, 238, 144),      # 淡綠色 #90EE90
-                '不同意': QColor(255, 160, 122),    # 淡紅色 #FFA07A
-                '棄權': QColor(255, 255, 0)         # 淡黃色 #FFFF00
-            }
+            if not votes:
+                label = QLabel("暫無投票記錄")
+                label.setStyleSheet("color: #999; font-style: italic;")
+                self.voted_labels_layout.insertWidget(0, label)
+                return
             
-            # 為每個已投票戶號創建標籤
+            # 為每個投票的住戶創建標籤
             for vote in votes:
                 household_id = vote['household_id']
                 vote_option = vote['vote']
                 
-                # 創建標籤
-                label = QLabel(household_id)
-                label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+                # 獲取住戶信息（包含面積）
+                household = self.db.get_household(household_id)
+                share_amount = household['share_amount'] if household else 0.0
+                
+                # 根據投票選項設置顏色
+                if vote_option == '同意':
+                    bg_color = "#4CAF50"
+                    text_color = "white"
+                elif vote_option == '不同意':
+                    bg_color = "#F44336"
+                    text_color = "white"
+                else:  # 棄權
+                    bg_color = "#FF9800"
+                    text_color = "white"
+                
+                # 創建標籤，包含戶號和面積(坪)
+                label_text = f"{household_id}\n({share_amount:.2f}坪)"
+                label = QLabel(label_text)
+                label.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {bg_color};
+                        color: {text_color};
+                        padding: 6px 10px;
+                        border-radius: 4px;
+                        font-size: 9pt;
+                        font-weight: bold;
+                        text-align: center;
+                    }}
+                """)
                 label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 
-                # 獲取背景色
-                bg_color = vote_colors.get(vote_option, QColor(200, 200, 200))
-                
-                # 設置樣式：圓角、邊框、背景色
-                label.setStyleSheet(f"""
-                    padding: 8px 12px;
-                    border-radius: 8px;
-                    background-color: {bg_color.name()};
-                    color: black;
-                    font-weight: bold;
-                    min-width: 70px;
-                    border: 2px solid {bg_color.darker(150).name()};
-                """)
-                
-                # 添加到布局（在 stretch 之前）
-                self.voted_labels_layout.insertWidget(
-                    self.voted_labels_layout.count() - 1, label
-                )
+                self.voted_labels_layout.insertWidget(0, label)
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
-
-    # ─────────────────────────── 匯出 / 匯入 ───────────────────────────
-
-    def _do_export(self, fmt: str):
-        """共用匯出邏輯"""
-        ext = 'xlsx' if fmt == 'xlsx' else fmt
-        default_name = f"votes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-        if fmt == 'xlsx':
-            filter_str = "Excel 檔案 (*.xlsx)"
-        else:
-            filter_str = "JSON 檔案 (*.json)"
-        path, _ = QFileDialog.getSaveFileName(
-            self, f"匯出投票數據（{fmt.upper()}）", default_name, filter_str
-        )
-        if not path:
-            return
-        result_path = self.db.export_voting_data(export_path=path)
-        if result_path:
-            QMessageBox.information(self, "匯出成功", f"投票數據已匯出到：\n{result_path}")
-        else:
-            QMessageBox.critical(self, "匯出失敗", "匯出投票數據時發生錯誤，請查看控制台訊息。")
-
+    
     def export_votes_xlsx(self):
-        """匯出 XLSX"""
-        self._do_export('xlsx')
-
+        """匯出投票數據為 XLSX"""
+        try:
+            export_path = self.db.export_voting_data()
+            if export_path:
+                QMessageBox.information(self, "成功", f"投票數據已匯出:\n{export_path}")
+            else:
+                QMessageBox.critical(self, "錯誤", "投票數據匯出失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"匯出失敗: {str(e)}")
+    
     def export_votes_json(self):
-        """匯出 JSON"""
-        self._do_export('json')
-
+        """匯出投票數據為 JSON"""
+        try:
+            if self.db.export_data():
+                QMessageBox.information(self, "成功", "投票數據已匯出到 exports/data.json")
+            else:
+                QMessageBox.critical(self, "錯誤", "投票數據匯出失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"匯出失敗: {str(e)}")
+    
     def open_import_dialog(self):
-        """打開匯入對話框"""
-        dialog = ImportVotingDataDialog(self.db, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # 匯入後刷新統計
-            self.refresh_vote_stats()
-            self._update_progress_bar()
-
-
-class ImportVotingDataDialog(QDialog):
-    """匯入投票數據對話框"""
-
-    def __init__(self, db: Database, parent=None):
-        super().__init__(parent)
-        self.db = db
-        self.setWindowTitle("匯入投票數據")
-        self.setMinimumWidth(520)
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-
-        # 文件選擇
-        file_group = QGroupBox("選擇文件")
-        file_layout = QHBoxLayout()
-        self.file_edit = QLineEdit()
-        self.file_edit.setPlaceholderText("選擇 XLSX 或 JSON 文件…")
-        self.file_edit.setReadOnly(True)
-        file_layout.addWidget(self.file_edit)
-        browse_btn = QPushButton("瀏覽…")
-        browse_btn.clicked.connect(self._browse_file)
-        file_layout.addWidget(browse_btn)
-        file_group.setLayout(file_layout)
-        layout.addWidget(file_group)
-
-        # 匯入模式
-        mode_group = QGroupBox("匯入模式")
-        mode_layout = QHBoxLayout()
-        self.mode_btn_group = QButtonGroup()
-        merge_radio = QRadioButton("合併（Merge）— 保留現有投票，跳過重複")
-        merge_radio.setChecked(True)
-        replace_radio = QRadioButton("覆蓋（Replace）— 清空現有投票後匯入")
-        self.mode_btn_group.addButton(merge_radio, 0)
-        self.mode_btn_group.addButton(replace_radio, 1)
-        mode_layout.addWidget(merge_radio)
-        mode_layout.addWidget(replace_radio)
-        mode_group.setLayout(mode_layout)
-        layout.addWidget(mode_group)
-
-        # 進度 / 結果區域
-        result_group = QGroupBox("匯入結果")
-        result_layout = QVBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.setVisible(False)
-        result_layout.addWidget(self.progress_bar)
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setMaximumHeight(150)
-        result_layout.addWidget(self.result_text)
-        result_group.setLayout(result_layout)
-        layout.addWidget(result_group)
-
-        # 按鈕
-        btn_box = QDialogButtonBox()
-        self.import_btn = btn_box.addButton("開始匯入", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.import_btn.setEnabled(False)
-        self.import_btn.setStyleSheet("background-color: #388E3C; color: white; font-weight: bold; padding: 6px 14px;")
-        cancel_btn = btn_box.addButton("關閉", QDialogButtonBox.ButtonRole.RejectRole)
-        btn_box.accepted.connect(self._run_import)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
-
-    def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "選擇投票數據文件", "",
-            "支持的格式 (*.xlsx *.json);;Excel 檔案 (*.xlsx);;JSON 檔案 (*.json)"
-        )
-        if path:
-            self.file_edit.setText(path)
-            self.import_btn.setEnabled(True)
-            self.result_text.clear()
-
-    def _run_import(self):
-        file_path = self.file_edit.text().strip()
-        if not file_path:
-            QMessageBox.warning(self, "警告", "請先選擇要匯入的文件")
-            return
-
-        mode = 'replace' if self.mode_btn_group.checkedId() == 1 else 'merge'
-
-        if mode == 'replace':
-            reply = QMessageBox.question(
-                self, "確認覆蓋",
-                "覆蓋模式將清空所有現有投票記錄！\n確定要繼續嗎？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
+        """打開匯入數據對話框"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "選擇要匯入的投票數據文件",
+                "",
+                "Excel Files (*.xlsx);;JSON Files (*.json)"
             )
-            if reply != QMessageBox.StandardButton.Yes:
+            
+            if not file_path:
                 return
-
-        # 顯示進度條
-        self.progress_bar.setVisible(True)
-        self.import_btn.setEnabled(False)
-        self.result_text.clear()
-
-        result = self.db.import_voting_data(file_path, mode=mode)
-
-        self.progress_bar.setVisible(False)
-        self.import_btn.setEnabled(True)
-
-        # 顯示結果
-        lines = []
-        for msg in result.get('messages', []):
-            lines.append(f"✅ {msg}")
-        if result.get('errors'):
-            lines.append(f"\n⚠ 驗證錯誤（共 {len(result['errors'])} 筆）：")
-            for err in result['errors'][:_MAX_DISPLAYED_ERRORS]:
-                lines.append(f"  • {err}")
-            if len(result['errors']) > _MAX_DISPLAYED_ERRORS:
-                lines.append(f"  … 以及其他 {len(result['errors']) - _MAX_DISPLAYED_ERRORS} 筆錯誤")
-        self.result_text.setPlainText('\n'.join(lines))
-
-        if result['success'] > 0:
-            self.accept()
+            
+            if file_path.endswith('.xlsx'):
+                result = self.db.import_voting_data(file_path, mode='merge')
+                if result['errors']:
+                    error_msg = "匯入完成，但有以下錯誤:\n\n"
+                    error_msg += "\n".join(result['errors'][:10])
+                    if len(result['errors']) > 10:
+                        error_msg += f"\n... 還有 {len(result['errors']) - 10} 個錯誤"
+                    QMessageBox.warning(self, "匯入提示", error_msg)
+                else:
+                    QMessageBox.information(self, "成功", "\n".join(result['messages']))
+                
+                # 刷新統計
+                self.refresh_vote_stats()
+                
+            else:
+                QMessageBox.warning(self, "提示", "暫不支持 JSON 匯入")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"匯入失敗: {str(e)}")
