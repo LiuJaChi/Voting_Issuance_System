@@ -79,16 +79,15 @@ class CheckInPrinter:
             code128_class = barcode.get_barcode_class('code128')
             writer = ImageWriter()
             
-            # 生成條碼實例（移除 add_checksum=False 參數）
+            # 生成條碼實例
             bar = code128_class(content, writer=writer)
             
-            # 條碼配置選項 - 調整高度和寬度確保清晰度
+            # 條碼配置選項 - 簡化版本，避免字體渲染問題
             options = {
                 'module_width': 0.75,      # 條碼條的寬度（增加以提高清晰度）
                 'module_height': 15.0,    # 條碼的高度（增加以提高掃描率）
-                'font_size': 0,           # 不顯示下方文字
-                'text_distance': 0,       # 文字距離
                 'quiet_zone': 3.0,        # 靜區寬度
+                'write_text': False,      # 不寫入文字，避免字體初始化問題
             }
             
             # 保存條碼圖像到文件
