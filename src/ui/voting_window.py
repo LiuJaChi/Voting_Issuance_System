@@ -4,7 +4,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QTableWidget, QTableWidgetItem, QLineEdit, QMessageBox, QHeaderView,
-    QGroupBox, QRadioButton, QButtonGroup, QProgressBar
+    QGroupBox, QRadioButton, QButtonGroup, QProgressBar, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -177,14 +177,18 @@ class VotingWindow(QWidget):
         voted_group = QGroupBox("5️⃣ 已投票住戶列表")
         voted_layout = QVBoxLayout()
         
-        self.voted_table = QTableWidget()
-        self.voted_table.setColumnCount(3)
-        self.voted_table.setHorizontalHeaderLabels(["戶號", "投票選項", "時間"])
-        self.voted_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.voted_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.voted_table.setMaximumHeight(150)
-        voted_layout.addWidget(self.voted_table)
+        self.voted_households_widget = QWidget()
+        self.voted_households_layout = QHBoxLayout()
+        self.voted_households_layout.setSpacing(5)
+        self.voted_households_layout.setContentsMargins(0, 0, 0, 0)
+        self.voted_households_layout.addStretch()
+        self.voted_households_widget.setLayout(self.voted_households_layout)
+        
+        self.voted_scroll = QScrollArea()
+        self.voted_scroll.setWidget(self.voted_households_widget)
+        self.voted_scroll.setWidgetResizable(True)
+        self.voted_scroll.setMaximumHeight(100)
+        voted_layout.addWidget(self.voted_scroll)
         
         voted_group.setLayout(voted_layout)
         main_layout.addWidget(voted_group)
@@ -435,7 +439,11 @@ class VotingWindow(QWidget):
     def refresh_voted_list(self):
         """刷新已投票住戶列表"""
         try:
-            self.voted_table.setRowCount(0)
+            # 清空現有的戶號標籤
+            while self.voted_households_layout.count() > 1:
+                widget = self.voted_households_layout.takeAt(0).widget()
+                if widget:
+                    widget.deleteLater()
             
             if not self.voting_items or self.current_case_idx >= len(self.voting_items):
                 return
@@ -447,39 +455,49 @@ class VotingWindow(QWidget):
             conn = self.db.get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT v.household_id, v.vote, v.voted_at
+                SELECT v.household_id, v.vote
                 FROM votes v
                 WHERE v.case_number = ?
-                ORDER BY v.voted_at DESC
-                LIMIT 50
+                ORDER BY v.voted_at ASC
             """, (case_number,))
             votes = cursor.fetchall()
             conn.close()
             
-            for row_idx, vote in enumerate(votes):
-                self.voted_table.insertRow(row_idx)
-                
-                household_id_item = QTableWidgetItem(vote['household_id'])
-                household_id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                
+            # 按投票選項設置顏色
+            vote_colors = {
+                '同意': '#C8E6C9',
+                '不同意': '#FFCDD2',
+                '棄權': '#FFF9C4',
+            }
+            border_colors = {
+                '同意': '#81C784',
+                '不同意': '#E57373',
+                '棄權': '#FFF176',
+            }
+            
+            for vote in votes:
+                household_id = vote['household_id']
                 vote_option = vote['vote']
-                vote_item = QTableWidgetItem(vote_option)
-                vote_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                vote_item.setForeground(QColor("black"))
                 
-                # 根據投票選項著色
-                if vote_option == "同意":
-                    vote_item.setBackground(QColor("#C8E6C9"))
-                elif vote_option == "不同意":
-                    vote_item.setBackground(QColor("#FFCDD2"))
-                elif vote_option == "棄權":
-                    vote_item.setBackground(QColor("#FFF9C4"))
+                bg_color = vote_colors.get(vote_option, '#E0E0E0')
+                bd_color = border_colors.get(vote_option, '#9E9E9E')
                 
-                time_item = QTableWidgetItem(str(vote['voted_at'])[:19])
+                label = QLabel(household_id)
+                label.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                label.setStyleSheet(f"""
+                    padding: 6px 10px;
+                    border-radius: 5px;
+                    background-color: {bg_color};
+                    color: black;
+                    font-weight: bold;
+                    min-width: 60px;
+                    border: 2px solid {bd_color};
+                """)
                 
-                self.voted_table.setItem(row_idx, 0, household_id_item)
-                self.voted_table.setItem(row_idx, 1, vote_item)
-                self.voted_table.setItem(row_idx, 2, time_item)
+                self.voted_households_layout.insertWidget(
+                    self.voted_households_layout.count() - 1, label
+                )
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
