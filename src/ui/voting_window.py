@@ -1,11 +1,12 @@
 """
-投票窗口 - 支持投票項目管理和投票刷票
+投票窗口 - 支持投票項目完整管理
 
 功能：
-1. 投票項目管理（項次、案名、投票種類、通過百分比）
-2. 投票結果統計（右側即時顯示）
-3. 投票刷票（選擇選項 + 掃描條碼）
-4. 分類統計（按投票選項分類顯示）
+1. 新增/編輯/刪除投票項目
+2. 編輯投票種類（重大議案 / 一般議案）
+3. 編輯通過百分比（50% ~ 100%）
+4. 投票結果統計和分類
+5. 投票刷票會話
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -73,9 +74,9 @@ class VotingWindow(QWidget):
         
         # 投票項目表
         self.voting_table = QTableWidget()
-        self.voting_table.setColumnCount(4)
+        self.voting_table.setColumnCount(5)
         self.voting_table.setHorizontalHeaderLabels(
-            ["項次", "案名", "投票種類", "通過百分比(%)"]
+            ["項次", "案名", "投票種類", "通過百分比(%)", "描述"]
         )
         self.voting_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
@@ -121,23 +122,29 @@ class VotingWindow(QWidget):
         for row_idx, item in enumerate(items):
             self.voting_table.insertRow(row_idx)
             
-            # 項次
+            # 項次（案號）
             case_number_item = QTableWidgetItem(item['case_number'])
             
             # 案名
             name_item = QTableWidgetItem(item['name'])
             
-            # 投票種類（暫時使用固定值，可後續擴展）
-            vote_type_item = QTableWidgetItem("三項（同意/反對/棄權）")
+            # 投票種類
+            vote_type = item.get('vote_type', '一般議案')
+            vote_type_item = QTableWidgetItem(vote_type)
             
-            # 通過百分比（使用系統配置或默認值）
-            pass_percentage = self.config_manager.get_config('pass_percentage', 66.7)
+            # 通過百分比
+            pass_percentage = item.get('pass_percentage', 66.7)
             pass_percentage_item = QTableWidgetItem(f"{pass_percentage:.1f}")
+            
+            # 描述
+            description = item.get('description', '')
+            description_item = QTableWidgetItem(description[:30] if description else '無')
             
             self.voting_table.setItem(row_idx, 0, case_number_item)
             self.voting_table.setItem(row_idx, 1, name_item)
             self.voting_table.setItem(row_idx, 2, vote_type_item)
             self.voting_table.setItem(row_idx, 3, pass_percentage_item)
+            self.voting_table.setItem(row_idx, 4, description_item)
         
         # 刷新投票結果
         self.refresh_voting_results()
@@ -149,8 +156,6 @@ class VotingWindow(QWidget):
         items = self.db.get_all_voting_items()
         stats = self.db.get_check_in_stats()
         total_attendees = stats['checked_in']
-        pass_percentage = self.config_manager.get_config('pass_percentage', 66.7)
-        pass_condition = int(total_attendees * pass_percentage / 100)
         
         for row_idx, item in enumerate(items):
             self.result_table.insertRow(row_idx)
@@ -160,6 +165,10 @@ class VotingWindow(QWidget):
             agree_votes = result['votes'].get('同意', 0)
             disagree_votes = result['votes'].get('不同意', 0)
             abstain_votes = result['votes'].get('棄權', 0)
+            
+            # 獲取該項目的通過百分比
+            pass_percentage = item.get('pass_percentage', 66.7)
+            pass_condition = int(total_attendees * pass_percentage / 100)
             
             # 項次
             case_number_item = QTableWidgetItem(item['case_number'])
@@ -200,9 +209,9 @@ class VotingWindow(QWidget):
         """新增投票項目"""
         dialog = VotingItemEditDialog(self, mode='new')
         if dialog.exec():
-            case_number, name, description = dialog.get_values()
+            case_number, name, description, vote_type, pass_percentage = dialog.get_values()
             
-            if self.db.add_voting_item(case_number, name, description):
+            if self.db.add_voting_item(case_number, name, description, vote_type, pass_percentage):
                 QMessageBox.information(self, "成功", "投票項目已添加")
                 self.load_voting_items()
             else:
@@ -216,26 +225,30 @@ class VotingWindow(QWidget):
             return
         
         case_number = self.voting_table.item(current_row, 0).text()
-        name = self.voting_table.item(current_row, 1).text()
-        
         item = self.db.get_voting_item(case_number)
-        description = item.get('description', '') if item else ''
         
-        dialog = VotingItemEditDialog(self, mode='edit', case_number=case_number, name=name, description=description)
+        if not item:
+            QMessageBox.critical(self, "錯誤", "找不到投票項目")
+            return
+        
+        dialog = VotingItemEditDialog(
+            self, 
+            mode='edit',
+            case_number=case_number,
+            name=item.get('name', ''),
+            description=item.get('description', ''),
+            vote_type=item.get('vote_type', '一般議案'),
+            pass_percentage=item.get('pass_percentage', 66.7)
+        )
+        
         if dialog.exec():
-            new_name, new_description = dialog.get_edit_values()
+            new_name, new_description, new_vote_type, new_pass_percentage = dialog.get_edit_values()
             
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE voting_items SET name = ?, description = ?
-                WHERE case_number = ?
-            """, (new_name, new_description, case_number))
-            conn.commit()
-            conn.close()
-            
-            QMessageBox.information(self, "成功", "投票項目已更新")
-            self.load_voting_items()
+            if self.db.update_voting_item(case_number, new_name, new_description, new_vote_type, new_pass_percentage):
+                QMessageBox.information(self, "成功", "投票項目已更新")
+                self.load_voting_items()
+            else:
+                QMessageBox.critical(self, "錯誤", "更新失敗")
     
     def delete_voting_item(self):
         """刪除投票項目"""
@@ -274,9 +287,10 @@ class VotingWindow(QWidget):
 
 
 class VotingItemEditDialog(QDialog):
-    """投票項目編輯對話框"""
+    """投票項目編輯對話框 - 支持編輯投票種類和通過百分比"""
     
-    def __init__(self, parent=None, mode='new', case_number='', name='', description=''):
+    def __init__(self, parent=None, mode='new', case_number='', name='', description='',
+                 vote_type='一般議案', pass_percentage=66.7):
         """初始化"""
         super().__init__(parent)
         self.mode = mode
@@ -287,7 +301,7 @@ class VotingItemEditDialog(QDialog):
         else:
             self.setWindowTitle("編輯投票項目")
         
-        self.setGeometry(100, 100, 400, 300)
+        self.setGeometry(100, 100, 500, 450)
         
         layout = QFormLayout()
         
@@ -306,6 +320,26 @@ class VotingItemEditDialog(QDialog):
         self.description_input = QLineEdit()
         self.description_input.setText(description)
         layout.addRow("描述:", self.description_input)
+        
+        # 投票種類
+        self.vote_type_combo = QComboBox()
+        self.vote_type_combo.addItems(["重大議案", "一般議案"])
+        self.vote_type_combo.setCurrentText(vote_type)
+        layout.addRow("投票種類:", self.vote_type_combo)
+        
+        # 通過百分比
+        pass_percentage_layout = QHBoxLayout()
+        self.pass_percentage_spinbox = QDoubleSpinBox()
+        self.pass_percentage_spinbox.setMinimum(50)
+        self.pass_percentage_spinbox.setMaximum(100)
+        self.pass_percentage_spinbox.setSingleStep(0.1)
+        self.pass_percentage_spinbox.setValue(pass_percentage)
+        self.pass_percentage_spinbox.setSuffix(" %")
+        pass_percentage_layout.addWidget(self.pass_percentage_spinbox)
+        pass_percentage_layout.addWidget(QLabel("(50 ~ 100)"))
+        layout.addRow("通過百分比:", pass_percentage_layout)
+        
+        layout.addRow("", QLabel(""))  # 空行
         
         # 按鈕
         button_layout = QHBoxLayout()
@@ -327,12 +361,16 @@ class VotingItemEditDialog(QDialog):
         return (
             self.case_number_input.text(),
             self.name_input.text(),
-            self.description_input.text()
+            self.description_input.text(),
+            self.vote_type_combo.currentText(),
+            self.pass_percentage_spinbox.value()
         )
     
     def get_edit_values(self):
         """獲取表單值（編輯模式）"""
         return (
             self.name_input.text(),
-            self.description_input.text()
+            self.description_input.text(),
+            self.vote_type_combo.currentText(),
+            self.pass_percentage_spinbox.value()
         )
