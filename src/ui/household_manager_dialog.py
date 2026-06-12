@@ -1,16 +1,15 @@
 """
 住戶管理對話框 - 支持 .xlsx/.csv 格式
-欄位支持：戶號 | 戶名 | 面積（坪）| 條碼
+欄位支持：戶號 | 戶名 | 面積（坪）
 """
 import csv
-import re
 from pathlib import Path
 from typing import List, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
-    QHeaderView, QFileDialog, QInputDialog
+    QHeaderView, QFileDialog
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -31,7 +30,7 @@ except ImportError:
 
 
 class HouseholdManagerDialog(QDialog):
-    """住戶管理對話框 - 支持條碼導入"""
+    """住戶管理對話框 - 支持住戶導入和報到資料導出"""
     
     def __init__(self, parent=None):
         """初始化住戶管理對話框"""
@@ -66,12 +65,12 @@ class HouseholdManagerDialog(QDialog):
         search_layout.addStretch()
         main_layout.addLayout(search_layout)
         
-        # 住戶表格 - 欄位順序：戶號 | 戶名 | 面積（坪） | 條碼
+        # 住戶表格 - 欄位順序：戶號 | 戶名 | 面積（坪）
         self.household_table = QTableWidget()
-        self.household_table.setColumnCount(4)
-        self.household_table.setHorizontalHeaderLabels(["戶號", "戶名", "面積（坪）", "條碼"])
+        self.household_table.setColumnCount(3)
+        self.household_table.setHorizontalHeaderLabels(["戶號", "戶名", "面積（坪）"])
         
-        for col in range(4):
+        for col in range(3):
             self.household_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeMode.Stretch
             )
@@ -92,9 +91,9 @@ class HouseholdManagerDialog(QDialog):
         import_button.clicked.connect(self.import_households)
         button_layout.addWidget(import_button)
         
-        # 導出按鈕
-        export_button = QPushButton("導出住戶（.xlsx）")
-        export_button.clicked.connect(self.export_households)
+        # 導出報到資料按鈕
+        export_button = QPushButton("導出報到資料（.xlsx）")
+        export_button.clicked.connect(self.export_check_in_data)
         button_layout.addWidget(export_button)
         
         button_layout.addSpacing(20)
@@ -124,21 +123,16 @@ class HouseholdManagerDialog(QDialog):
         
         households = self.db.get_all_households()
         for household in households:
-            household_id = household['household_id']
-            # 查詢條碼
-            barcode = self.db.get_barcode_by_household_id(household_id)
-            
             self.all_households.append({
-                'household_id': household_id,
+                'household_id': household['household_id'],
                 'name': household['name'],
                 'share_amount': household.get('share_amount', 0.0),
-                'barcode': barcode or ''
             })
         
         self.refresh_table(self.all_households)
     
     def refresh_table(self, households: List[Dict]):
-        """刷新表格顯示 - 順序：戶號 | 戶名 | 面積（坪） | 條碼"""
+        """刷新表格顯示 - 順序：戶號 | 戶名 | 面積（坪）"""
         self.household_table.setRowCount(0)
         
         for household in households:
@@ -160,12 +154,6 @@ class HouseholdManagerDialog(QDialog):
             share_item = QTableWidgetItem(str(share_amount))
             share_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.household_table.setItem(row_position, 2, share_item)
-            
-            # 條碼
-            self.household_table.setItem(
-                row_position, 3,
-                QTableWidgetItem(household.get('barcode', ''))
-            )
     
     def filter_households(self):
         """根據搜尋條件過濾住戶"""
@@ -182,15 +170,6 @@ class HouseholdManagerDialog(QDialog):
         ]
         
         self.refresh_table(filtered)
-    
-    def _clean_barcode(self, barcode_str: str) -> str:
-        """清理條碼 - 移除星號或其他符號"""
-        if not barcode_str:
-            return ''
-        
-        # 移除前後的星號或空格
-        cleaned = barcode_str.strip().strip('*')
-        return cleaned
     
     def _parse_share_amount(self, value) -> float:
         """解析面積數值"""
@@ -224,7 +203,7 @@ class HouseholdManagerDialog(QDialog):
                 QMessageBox.warning(self, "警告", "文件中沒有有效的住戶數據")
                 return
             
-            # 導入住戶和條碼映射
+            # 導入住戶
             success = 0
             failed = 0
             
@@ -232,7 +211,6 @@ class HouseholdManagerDialog(QDialog):
                 household_id = household['household_id'].strip()
                 name = household['name'].strip()
                 share_amount = household.get('share_amount', 0.0)
-                barcode = household.get('barcode', '').strip()
                 
                 if not household_id or not name:
                     failed += 1
@@ -246,10 +224,6 @@ class HouseholdManagerDialog(QDialog):
                 # 添加住戶
                 if self.db.add_household(household_id, name, share_amount):
                     success += 1
-                    
-                    # 如果有條碼，添加映射
-                    if barcode:
-                        self.db.add_barcode_mapping(household_id, barcode)
                 else:
                     failed += 1
             
@@ -269,7 +243,7 @@ class HouseholdManagerDialog(QDialog):
         """
         讀取 CSV 文件
         
-        期望的列：戶號 | 戶名 | 面積（坪） | 條碼
+        期望的列：戶號 | 戶名 | 面積（坪）
         或任何包含這些關鍵字的列名
         """
         households = []
@@ -287,7 +261,6 @@ class HouseholdManagerDialog(QDialog):
                 household_id_col = None
                 name_col = None
                 share_col = None
-                barcode_col = None
                 
                 for idx, field in enumerate(fieldnames_lower):
                     if '戶號' in field or 'household' in field:
@@ -296,8 +269,6 @@ class HouseholdManagerDialog(QDialog):
                         name_col = reader.fieldnames[idx]
                     elif '面積' in field or '坪' in field or 'area' in field:
                         share_col = reader.fieldnames[idx]
-                    elif '條碼' in field or 'barcode' in field:
-                        barcode_col = reader.fieldnames[idx]
                 
                 if not household_id_col:
                     raise ValueError("找不到 '戶號' 列")
@@ -309,14 +280,12 @@ class HouseholdManagerDialog(QDialog):
                     household_id = row.get(household_id_col, '').strip()
                     name = row.get(name_col, '').strip()
                     share_amount = self._parse_share_amount(row.get(share_col, 0.0))
-                    barcode = self._clean_barcode(row.get(barcode_col, ''))
                     
                     if household_id and name:
                         households.append({
                             'household_id': household_id,
                             'name': name,
                             'share_amount': share_amount,
-                            'barcode': barcode
                         })
         
         except Exception as e:
@@ -328,7 +297,7 @@ class HouseholdManagerDialog(QDialog):
         """
         讀取 .xlsx 文件
         
-        期望的列：戶號 | 戶名 | 面積（坪） | 條碼
+        期望的列：戶號 | 戶名 | 面積（坪）
         或任何包含這些關鍵字的列名
         """
         households = []
@@ -349,7 +318,6 @@ class HouseholdManagerDialog(QDialog):
                 household_id_col = None
                 name_col = None
                 share_col = None
-                barcode_col = None
                 
                 for idx, header in enumerate(headers):
                     if not header:
@@ -362,8 +330,6 @@ class HouseholdManagerDialog(QDialog):
                         name_col = idx
                     elif '面積' in header_lower or '坪' in header_lower or 'area' in header_lower:
                         share_col = idx
-                    elif '條碼' in header_lower or 'barcode' in header_lower:
-                        barcode_col = idx
                 
                 if household_id_col is None:
                     raise ValueError("找不到 '戶號' 列")
@@ -378,14 +344,12 @@ class HouseholdManagerDialog(QDialog):
                     household_id = str(row[household_id_col]).strip()
                     name = str(row[name_col]).strip() if row[name_col] else ''
                     share_amount = self._parse_share_amount(row[share_col]) if share_col is not None else 0.0
-                    barcode = self._clean_barcode(str(row[barcode_col])) if barcode_col is not None and row[barcode_col] else ''
                     
                     if household_id and name:
                         households.append({
                             'household_id': household_id,
                             'name': name,
                             'share_amount': share_amount,
-                            'barcode': barcode
                         })
             
             except Exception as e:
@@ -401,7 +365,6 @@ class HouseholdManagerDialog(QDialog):
                 household_id_col = None
                 name_col = None
                 share_col = None
-                barcode_col = None
                 
                 for col in df.columns:
                     col_lower = str(col).lower().strip()
@@ -412,8 +375,6 @@ class HouseholdManagerDialog(QDialog):
                         name_col = col
                     elif '面積' in col_lower or '坪' in col_lower or 'area' in col_lower:
                         share_col = col
-                    elif '條碼' in col_lower or 'barcode' in col_lower:
-                        barcode_col = col
                 
                 if not household_id_col:
                     raise ValueError("找不到 '戶號' 列")
@@ -425,14 +386,12 @@ class HouseholdManagerDialog(QDialog):
                     household_id = str(row[household_id_col]).strip() if pd.notna(row[household_id_col]) else ''
                     name = str(row[name_col]).strip() if pd.notna(row[name_col]) else ''
                     share_amount = self._parse_share_amount(row[share_col]) if share_col and pd.notna(row[share_col]) else 0.0
-                    barcode = self._clean_barcode(str(row[barcode_col])) if barcode_col and pd.notna(row[barcode_col]) else ''
                     
                     if household_id and household_id != 'nan' and name and name != 'nan':
                         households.append({
                             'household_id': household_id,
                             'name': name,
                             'share_amount': share_amount,
-                            'barcode': barcode
                         })
             
             except Exception as e:
@@ -440,8 +399,8 @@ class HouseholdManagerDialog(QDialog):
         
         return households
     
-    def export_households(self):
-        """導出住戶到 .xlsx 文件"""
+    def export_check_in_data(self):
+        """導出報到資料到 .xlsx 文件（可選擇目錄和文件名）"""
         if not XLSX_AVAILABLE and not PANDAS_AVAILABLE:
             QMessageBox.critical(
                 self, "錯誤",
@@ -452,8 +411,8 @@ class HouseholdManagerDialog(QDialog):
         
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "保存住戶 .xlsx 文件",
-            "households.xlsx",
+            "保存報到資料",
+            "報到資料.xlsx",
             "Excel 文件 (*.xlsx)"
         )
         
@@ -461,6 +420,7 @@ class HouseholdManagerDialog(QDialog):
             return
         
         try:
+            # 獲取所有住戶數據
             households_data = []
             
             for household in self.all_households:
@@ -468,7 +428,6 @@ class HouseholdManagerDialog(QDialog):
                     '戶號': household['household_id'],
                     '戶名': household['name'],
                     '面積（坪）': household.get('share_amount', 0.0),
-                    '條碼': household.get('barcode', '')
                 })
             
             if not households_data:
@@ -480,25 +439,24 @@ class HouseholdManagerDialog(QDialog):
                 import pandas as pd
                 
                 df = pd.DataFrame(households_data)
-                df.to_excel(file_path, index=False, sheet_name='住戶')
+                df.to_excel(file_path, index=False, sheet_name='報到資料')
             
             elif XLSX_AVAILABLE:
                 # 使用 openpyxl 導出
                 from openpyxl import Workbook
-                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                from openpyxl.styles import Font, PatternFill, Alignment
                 
                 workbook = Workbook()
                 worksheet = workbook.active
-                worksheet.title = '住戶'
+                worksheet.title = '報到資料'
                 
                 # 設置列寬
                 worksheet.column_dimensions['A'].width = 12
                 worksheet.column_dimensions['B'].width = 18
                 worksheet.column_dimensions['C'].width = 15
-                worksheet.column_dimensions['D'].width = 18
                 
                 # 寫入標題
-                headers = ['戶號', '戶名', '面積（坪）', '條碼']
+                headers = ['戶號', '戶名', '面積（坪）']
                 header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
                 header_font = Font(bold=True, size=11, color="FFFFFF")
                 
@@ -513,13 +471,12 @@ class HouseholdManagerDialog(QDialog):
                     worksheet.cell(row=row_idx, column=1, value=household['戶號'])
                     worksheet.cell(row=row_idx, column=2, value=household['戶名'])
                     worksheet.cell(row=row_idx, column=3, value=household['面積（坪）'])
-                    worksheet.cell(row=row_idx, column=4, value=household['條碼'])
                 
                 workbook.save(file_path)
             
             QMessageBox.information(
                 self, "成功",
-                f"已導出 {len(households_data)} 個住戶到 {Path(file_path).name}"
+                f"已導出 {len(households_data)} 個住戶到\n{Path(file_path).name}"
             )
             
         except Exception as e:
