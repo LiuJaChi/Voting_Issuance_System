@@ -5,8 +5,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, QTimer
-from src.database.database import Database
-from src.utils.barcode_generator import BarcodeGenerator
+from src.backend.database import Database
+from src.backend.barcode_generator import BarcodeGenerator
 
 
 class VotingWindow(QWidget):
