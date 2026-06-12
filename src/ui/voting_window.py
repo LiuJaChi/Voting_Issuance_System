@@ -1,12 +1,16 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QComboBox, 
     QLineEdit, QPushButton, QRadioButton, QButtonGroup, QTableWidget, 
-    QTableWidgetItem, QProgressBar, QMessageBox, QHeaderView, QScrollArea
+    QTableWidgetItem, QProgressBar, QMessageBox, QHeaderView, QScrollArea,
+    QDialog, QFileDialog, QTextEdit, QDialogButtonBox
 )
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt, QTimer
+from datetime import datetime
 from src.backend.database import Database
 from src.backend.barcode_generator import BarcodeGenerator
+
+_MAX_DISPLAYED_ERRORS = 20
 
 
 class VotingWindow(QWidget):
@@ -167,6 +171,27 @@ class VotingWindow(QWidget):
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         stats_layout.addWidget(self.vote_stats_table)
         
+        # 匯出 / 匯入按鈕列
+        io_layout = QHBoxLayout()
+
+        export_csv_btn = QPushButton("📤 匯出 CSV")
+        export_csv_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
+        export_csv_btn.clicked.connect(self.export_votes_csv)
+        io_layout.addWidget(export_csv_btn)
+
+        export_json_btn = QPushButton("📤 匯出 JSON")
+        export_json_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
+        export_json_btn.clicked.connect(self.export_votes_json)
+        io_layout.addWidget(export_json_btn)
+
+        import_btn = QPushButton("📥 匯入數據")
+        import_btn.setStyleSheet("background-color: #388E3C; color: white; font-weight: bold; padding: 6px 14px;")
+        import_btn.clicked.connect(self.open_import_dialog)
+        io_layout.addWidget(import_btn)
+
+        io_layout.addStretch()
+        stats_layout.addLayout(io_layout)
+
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
@@ -558,3 +583,154 @@ class VotingWindow(QWidget):
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
+
+    # ─────────────────────────── 匯出 / 匯入 ───────────────────────────
+
+    def _do_export(self, fmt: str):
+        """共用匯出邏輯"""
+        default_name = f"votes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
+        filter_str = "CSV 檔案 (*.csv)" if fmt == 'csv' else "JSON 檔案 (*.json)"
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"匯出投票數據（{fmt.upper()}）", default_name, filter_str
+        )
+        if not path:
+            return
+        result_path = self.db.export_voting_data(format=fmt, export_path=path)
+        if result_path:
+            QMessageBox.information(self, "匯出成功", f"投票數據已匯出到：\n{result_path}")
+        else:
+            QMessageBox.critical(self, "匯出失敗", "匯出投票數據時發生錯誤，請查看控制台訊息。")
+
+    def export_votes_csv(self):
+        """匯出 CSV"""
+        self._do_export('csv')
+
+    def export_votes_json(self):
+        """匯出 JSON"""
+        self._do_export('json')
+
+    def open_import_dialog(self):
+        """打開匯入對話框"""
+        dialog = ImportVotingDataDialog(self.db, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 匯入後刷新統計
+            self.refresh_vote_stats()
+            self._update_progress_bar()
+
+
+class ImportVotingDataDialog(QDialog):
+    """匯入投票數據對話框"""
+
+    def __init__(self, db: Database, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("匯入投票數據")
+        self.setMinimumWidth(520)
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # 文件選擇
+        file_group = QGroupBox("選擇文件")
+        file_layout = QHBoxLayout()
+        self.file_edit = QLineEdit()
+        self.file_edit.setPlaceholderText("選擇 CSV 或 JSON 文件…")
+        self.file_edit.setReadOnly(True)
+        file_layout.addWidget(self.file_edit)
+        browse_btn = QPushButton("瀏覽…")
+        browse_btn.clicked.connect(self._browse_file)
+        file_layout.addWidget(browse_btn)
+        file_group.setLayout(file_layout)
+        layout.addWidget(file_group)
+
+        # 匯入模式
+        mode_group = QGroupBox("匯入模式")
+        mode_layout = QHBoxLayout()
+        self.mode_btn_group = QButtonGroup()
+        merge_radio = QRadioButton("合併（Merge）— 保留現有投票，跳過重複")
+        merge_radio.setChecked(True)
+        replace_radio = QRadioButton("覆蓋（Replace）— 清空現有投票後匯入")
+        self.mode_btn_group.addButton(merge_radio, 0)
+        self.mode_btn_group.addButton(replace_radio, 1)
+        mode_layout.addWidget(merge_radio)
+        mode_layout.addWidget(replace_radio)
+        mode_group.setLayout(mode_layout)
+        layout.addWidget(mode_group)
+
+        # 進度 / 結果區域
+        result_group = QGroupBox("匯入結果")
+        result_layout = QVBoxLayout()
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(False)
+        result_layout.addWidget(self.progress_bar)
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        self.result_text.setMaximumHeight(150)
+        result_layout.addWidget(self.result_text)
+        result_group.setLayout(result_layout)
+        layout.addWidget(result_group)
+
+        # 按鈕
+        btn_box = QDialogButtonBox()
+        self.import_btn = btn_box.addButton("開始匯入", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.import_btn.setEnabled(False)
+        self.import_btn.setStyleSheet("background-color: #388E3C; color: white; font-weight: bold; padding: 6px 14px;")
+        cancel_btn = btn_box.addButton("關閉", QDialogButtonBox.ButtonRole.RejectRole)
+        btn_box.accepted.connect(self._run_import)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def _browse_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "選擇投票數據文件", "",
+            "支持的格式 (*.csv *.json);;CSV 檔案 (*.csv);;JSON 檔案 (*.json)"
+        )
+        if path:
+            self.file_edit.setText(path)
+            self.import_btn.setEnabled(True)
+            self.result_text.clear()
+
+    def _run_import(self):
+        file_path = self.file_edit.text().strip()
+        if not file_path:
+            QMessageBox.warning(self, "警告", "請先選擇要匯入的文件")
+            return
+
+        mode = 'replace' if self.mode_btn_group.checkedId() == 1 else 'merge'
+
+        if mode == 'replace':
+            reply = QMessageBox.question(
+                self, "確認覆蓋",
+                "覆蓋模式將清空所有現有投票記錄！\n確定要繼續嗎？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # 顯示進度條
+        self.progress_bar.setVisible(True)
+        self.import_btn.setEnabled(False)
+        self.result_text.clear()
+
+        result = self.db.import_voting_data(file_path, mode=mode)
+
+        self.progress_bar.setVisible(False)
+        self.import_btn.setEnabled(True)
+
+        # 顯示結果
+        lines = []
+        for msg in result.get('messages', []):
+            lines.append(f"✅ {msg}")
+        if result.get('errors'):
+            lines.append(f"\n⚠ 驗證錯誤（共 {len(result['errors'])} 筆）：")
+            for err in result['errors'][:_MAX_DISPLAYED_ERRORS]:
+                lines.append(f"  • {err}")
+            if len(result['errors']) > _MAX_DISPLAYED_ERRORS:
+                lines.append(f"  … 以及其他 {len(result['errors']) - _MAX_DISPLAYED_ERRORS} 筆錯誤")
+        self.result_text.setPlainText('\n'.join(lines))
+
+        if result['success'] > 0:
+            self.accept()
