@@ -9,9 +9,8 @@
 - 條碼映射（household_id, barcode_data）
 """
 import sqlite3
-import csv
-import io
 import json
+import openpyxl
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -493,8 +492,8 @@ class Database:
         """將時間戳截取為 'YYYY-MM-DD HH:MM:SS' 格式字符串"""
         return str(ts)[:19] if ts else ''
 
-    def export_voting_data(self, format: str = 'csv', export_path: str = None) -> str:
-        """匯出所有投票數據，支持 csv 和 json 兩種格式。
+    def export_voting_data(self, format: str = 'xlsx', export_path: str = None) -> str:
+        """匯出所有投票數據，支持 xlsx 和 json 兩種格式。
 
         Returns:
             匯出的文件路徑字符串，失敗時返回空字符串。
@@ -528,22 +527,20 @@ class Database:
 
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
 
-            if format == 'csv':
-                # utf-8-sig adds a BOM so that Excel on Windows opens the file correctly
-                with open(export_path, 'w', newline='', encoding='utf-8-sig') as f:
-                    writer = csv.DictWriter(
-                        f,
-                        fieldnames=['household_id', 'case_number', 'case_name', 'vote', 'voted_at']
-                    )
-                    writer.writeheader()
-                    for row in votes:
-                        writer.writerow({
-                            'household_id': row['household_id'],
-                            'case_number': row['case_number'],
-                            'case_name': row.get('case_name', ''),
-                            'vote': row['vote'],
-                            'voted_at': self._fmt_timestamp(row['voted_at']),
-                        })
+            if format == 'xlsx':
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "投票數據"
+                ws.append(['household_id', 'case_number', 'case_name', 'vote', 'voted_at'])
+                for row in votes:
+                    ws.append([
+                        row['household_id'],
+                        row['case_number'],
+                        row.get('case_name', ''),
+                        row['vote'],
+                        self._fmt_timestamp(row['voted_at']),
+                    ])
+                wb.save(export_path)
             elif format == 'json':
                 export_data = {
                     'export_time': datetime.now().isoformat(),
@@ -629,7 +626,7 @@ class Database:
         """匯入投票數據。
 
         Args:
-            file_path: CSV 或 JSON 文件路徑。
+            file_path: XLSX 或 JSON 文件路徑。
             mode: 'merge'（合併）或 'replace'（覆蓋）。
 
         Returns:
@@ -648,10 +645,15 @@ class Database:
 
             # 讀取文件
             raw_rows: List[Dict] = []
-            if ext == '.csv':
-                with open(file_path, newline='', encoding='utf-8-sig') as f:
-                    reader = csv.DictReader(f)
-                    raw_rows = list(reader)
+            if ext == '.xlsx':
+                wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+                ws = wb.active
+                rows = list(ws.iter_rows(values_only=True))
+                if rows:
+                    headers = [str(h).strip() if h is not None else '' for h in rows[0]]
+                    for data_row in rows[1:]:
+                        raw_rows.append(dict(zip(headers, [str(v).strip() if v is not None else '' for v in data_row])))
+                wb.close()
             elif ext == '.json':
                 with open(file_path, encoding='utf-8') as f:
                     data = json.load(f)
@@ -664,7 +666,7 @@ class Database:
                     result['errors'].append('JSON 格式不正確：需要列表或含 "votes" 鍵的物件')
                     return result
             else:
-                result['errors'].append(f'不支持的文件格式：{ext}（僅支持 .csv / .json）')
+                result['errors'].append(f'不支持的文件格式：{ext}（僅支持 .xlsx / .json）')
                 return result
 
             if not raw_rows:
