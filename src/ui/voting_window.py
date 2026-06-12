@@ -166,15 +166,16 @@ class VotingWindow(QWidget):
         
         # 投票結果表
         self.vote_stats_table = QTableWidget()
-        self.vote_stats_table.setColumnCount(5)
+        self.vote_stats_table.setColumnCount(6)
         self.vote_stats_table.setHorizontalHeaderLabels(
-            ["案號", "項目名稱", "同意", "不同意", "棄權"]
+            ["案號", "項目名稱", "同意", "不同意", "棄權", "進度"]
         )
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.vote_stats_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         stats_layout.addWidget(self.vote_stats_table)
         
         stats_group.setLayout(stats_layout)
@@ -298,6 +299,8 @@ class VotingWindow(QWidget):
             
             # 刷新投票統計
             self.refresh_vote_stats()
+            # 更新頂部進度條為當前選中案的進度
+            self._update_progress_bar()
     
     def on_vote_option_selected(self, checked, option):
         """投票選項選中時的處理"""
@@ -389,7 +392,6 @@ class VotingWindow(QWidget):
             if not self.voting_items:
                 return
             
-            total_voted = 0
             total_households = len(self.checked_in_households)
             
             for row_idx, case in enumerate(self.voting_items):
@@ -406,7 +408,14 @@ class VotingWindow(QWidget):
                 abstain_count = results.get('votes', {}).get('棄權', 0)
                 
                 total_count = agree_count + disagree_count + abstain_count
-                total_voted = max(total_voted, total_count)
+                
+                # 計算該案進度百分比
+                if total_households > 0:
+                    case_progress = int((total_count / total_households) * 100)
+                    progress_text = f"{total_count}/{total_households} ({case_progress}%)"
+                else:
+                    case_progress = 0
+                    progress_text = "0/0 (0%)"
                 
                 # 填充表格
                 case_num_item = QTableWidgetItem(case_number)
@@ -429,23 +438,51 @@ class VotingWindow(QWidget):
                 abstain_item.setBackground(QColor("#FFF9C4"))
                 abstain_item.setForeground(QColor("black"))
                 
+                progress_item = QTableWidgetItem(progress_text)
+                progress_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                
                 self.vote_stats_table.setItem(row_idx, 0, case_num_item)
                 self.vote_stats_table.setItem(row_idx, 1, case_name_item)
                 self.vote_stats_table.setItem(row_idx, 2, agree_item)
                 self.vote_stats_table.setItem(row_idx, 3, disagree_item)
                 self.vote_stats_table.setItem(row_idx, 4, abstain_item)
+                self.vote_stats_table.setItem(row_idx, 5, progress_item)
             
-            # 更新進度
-            if total_households > 0:
-                progress = int((total_voted / total_households) * 100)
-                self.progress_bar.setValue(progress)
-                self.progress_label.setText(f"投票進度: {total_voted} / {total_households} ({progress}%)")
+            # 更新頂部進度條為當前選中案的進度
+            self._update_progress_bar()
             
             # 刷新已投票列表
             self.refresh_voted_list()
             
         except Exception as e:
             print(f"刷新投票統計失敗: {e}")
+    
+    def _update_progress_bar(self):
+        """更新頂部進度條為當前選中案的進度"""
+        total_households = len(self.checked_in_households)
+        if not self.voting_items or self.current_case_idx >= len(self.voting_items):
+            self.progress_bar.setValue(0)
+            self.progress_label.setText("投票進度: 0 / 0")
+            return
+        
+        case = self.voting_items[self.current_case_idx]
+        case_number = case['case_number']
+        results = self.db.get_voting_results(case_number)
+        
+        agree_count = results.get('votes', {}).get('同意', 0)
+        disagree_count = results.get('votes', {}).get('不同意', 0)
+        abstain_count = results.get('votes', {}).get('棄權', 0)
+        total_voted = agree_count + disagree_count + abstain_count
+        
+        if total_households > 0:
+            progress = int((total_voted / total_households) * 100)
+            self.progress_bar.setValue(progress)
+            self.progress_label.setText(
+                f"第{case_number}案進度: {total_voted} / {total_households} ({progress}%)"
+            )
+        else:
+            self.progress_bar.setValue(0)
+            self.progress_label.setText(f"第{case_number}案進度: 0 / 0 (0%)")
     
     def refresh_voted_list(self):
         """刷新已投票住戶列表 - 橫向標籤樣式"""
