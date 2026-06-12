@@ -1,14 +1,15 @@
 """
-報到窗口 - 移除原始條碼欄位，添加進度條和統計圖表
+報到窗口 - 移除原始條碼欄位，添加進度條和統計圖表（使用 Matplotlib）
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QMessageBox, QHeaderView, QProgressBar
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor
-from PyQt6.QtChart import QChart, QChartView, QPieSeries, QPieSlice
-from PyQt6.QtGui import QPainter
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 
 from src.backend.database import Database
 from src.backend.check_in_printer import CheckInPrinter
@@ -127,10 +128,10 @@ class CheckInWindow(QWidget):
         chart_title.setFont(chart_title_font)
         right_layout.addWidget(chart_title)
         
-        # 建立圓餅圖
-        self.chart_view = QChartView()
-        self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        right_layout.addWidget(self.chart_view)
+        # 建立 Matplotlib 圖表
+        self.figure = Figure(figsize=(5, 4), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        right_layout.addWidget(self.canvas)
         
         # ========== 組合左右布局 ==========
         main_layout.addLayout(left_layout, 2)  # 左側佔 2 份
@@ -149,38 +150,52 @@ class CheckInWindow(QWidget):
             checked_in: 已報到人數
             not_checked_in: 未報到人數
         """
-        # 建立圖表
-        chart = QChart()
-        chart.setTitle("報到狀態分佈")
-        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
         
-        # 建立圓餅圖數據
-        series = QPieSeries()
+        # 準備數據
+        labels = []
+        sizes = []
+        colors = []
         
         if checked_in > 0:
-            slice_checked = QPieSlice("已報到", checked_in)
-            slice_checked.setColor(QColor(76, 175, 80))  # 綠色
-            slice_checked.setLabelVisible(True)
-            series.append(slice_checked)
+            labels.append(f'已報到\n({checked_in})')
+            sizes.append(checked_in)
+            colors.append('#4CAF50')  # 綠色
         
         if not_checked_in > 0:
-            slice_not_checked = QPieSlice("未報到", not_checked_in)
-            slice_not_checked.setColor(QColor(244, 67, 54))  # 紅色
-            slice_not_checked.setLabelVisible(True)
-            series.append(slice_not_checked)
+            labels.append(f'未報到\n({not_checked_in})')
+            sizes.append(not_checked_in)
+            colors.append('#F44336')  # 紅色
         
-        if checked_in == 0 and not_checked_in == 0:
+        if not sizes:
             # 沒有數據時顯示提示
-            slice_empty = QPieSlice("暫無數據", 1)
-            slice_empty.setColor(QColor(200, 200, 200))  # 灰色
-            slice_empty.setLabelVisible(True)
-            series.append(slice_empty)
+            labels = ['暫無數據']
+            sizes = [1]
+            colors = ['#CCCCCC']
         
-        chart.addSeries(series)
-        chart.legend().setVisible(True)
-        chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
+        # 繪製圓餅圖
+        wedges, texts, autotexts = ax.pie(
+            sizes,
+            labels=labels,
+            colors=colors,
+            autopct='%1.1f%%',
+            startangle=90
+        )
         
-        self.chart_view.setChart(chart)
+        # 美化文本
+        for autotext in autotexts:
+            autotext.set_color('white')
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(10)
+        
+        for text in texts:
+            text.set_fontsize(9)
+        
+        ax.set_title('報到狀態分佈', fontsize=12, fontweight='bold', pad=20)
+        
+        self.figure.tight_layout()
+        self.canvas.draw()
     
     def process_check_in(self):
         """
