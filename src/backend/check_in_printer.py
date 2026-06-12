@@ -80,8 +80,8 @@ class CheckInPrinter:
             code128_class = barcode.get_barcode_class('code128')
             writer = ImageWriter()
             
-            # 生成條碼實例
-            bar = code128_class(content, writer=writer, add_checksum=False)
+            # 生成條碼實例（移除 add_checksum=False 參數）
+            bar = code128_class(content, writer=writer)
             
             # 條碼配置選項 - 調整高度和寬度確保清晰度
             options = {
@@ -93,7 +93,7 @@ class CheckInPrinter:
             }
             
             # 保存條碼圖像到文件
-            # barcode.save() 返回完整文件路徑（包含 .png 副檔名）
+            # barcode.save() 返回完整文件路徑（包含 .png）
             actual_path = bar.save(temp_path, options=options)
             
             print(f"✓ 條碼庫返回路徑: {actual_path}")
@@ -104,14 +104,7 @@ class CheckInPrinter:
                 print(f"✓ Code128 條碼生成成功: {content}")
                 return actual_path
             else:
-                # 嘗試帶 .png 副檔名
-                png_path = temp_path + '.png'
-                if os.path.exists(png_path):
-                    self.temp_barcodes.append(png_path)
-                    print(f"✓ Code128 條碼生成成功 (已添加.png): {content}")
-                    return png_path
-                else:
-                    raise FileNotFoundError(f"條碼文件未生成。預期路徑: {actual_path} 或 {png_path}")
+                raise FileNotFoundError(f"條碼文件未生成: {actual_path}")
             
         except Exception as e:
             print(f"✗ Code128 條碼生成失敗 {content}: {e}")
@@ -128,7 +121,7 @@ class CheckInPrinter:
         生成報到單 PDF
         
         報到單格式：
-        戶號（上方） + Code128 條碼圖像（下方）
+        戶號（上方）+ Code128 條碼圖像（下方）
         
         Args:
             households: [{'household_id': 'A106-02', 'name': '洪正平'}, ...]
