@@ -39,7 +39,7 @@ class BarcodeGenerator:
         try:
             # 使用 Code128 格式直接編碼戶號
             code128_class = barcode.get_barcode_class('code128')
-            bar = code128_class(barcode_data, writer=ImageWriter(), add_checksum=False)
+            bar = code128_class(barcode_data, writer=ImageWriter())
             
             # 設置條碼選項
             options = {
@@ -50,12 +50,12 @@ class BarcodeGenerator:
                 'quiet_zone': 3.0,        # 靜區寬度
             }
             
-            bar.save(filepath, options=options)
+            actual_path = bar.save(filepath, options=options)
             
             # 記錄映射關係
             self.conversion_map[barcode_data] = barcode_data
             
-            return f"{filepath}.png"
+            return actual_path
         except Exception as e:
             print(f"Code128 條碼生成失敗 {barcode_data}: {e}")
             raise
