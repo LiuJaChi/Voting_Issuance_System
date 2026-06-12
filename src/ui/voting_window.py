@@ -174,10 +174,10 @@ class VotingWindow(QWidget):
         # 匯出 / 匯入按鈕列
         io_layout = QHBoxLayout()
 
-        export_csv_btn = QPushButton("📤 匯出 CSV")
-        export_csv_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
-        export_csv_btn.clicked.connect(self.export_votes_csv)
-        io_layout.addWidget(export_csv_btn)
+        export_xlsx_btn = QPushButton("📤 匯出 XLSX")
+        export_xlsx_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
+        export_xlsx_btn.clicked.connect(self.export_votes_xlsx)
+        io_layout.addWidget(export_xlsx_btn)
 
         export_json_btn = QPushButton("📤 匯出 JSON")
         export_json_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
@@ -589,7 +589,7 @@ class VotingWindow(QWidget):
     def _do_export(self, fmt: str):
         """共用匯出邏輯"""
         default_name = f"votes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt}"
-        filter_str = "CSV 檔案 (*.csv)" if fmt == 'csv' else "JSON 檔案 (*.json)"
+        filter_str = "Excel 檔案 (*.xlsx)" if fmt == 'xlsx' else "JSON 檔案 (*.json)"
         path, _ = QFileDialog.getSaveFileName(
             self, f"匯出投票數據（{fmt.upper()}）", default_name, filter_str
         )
@@ -601,9 +601,9 @@ class VotingWindow(QWidget):
         else:
             QMessageBox.critical(self, "匯出失敗", "匯出投票數據時發生錯誤，請查看控制台訊息。")
 
-    def export_votes_csv(self):
-        """匯出 CSV"""
-        self._do_export('csv')
+    def export_votes_xlsx(self):
+        """匯出 XLSX"""
+        self._do_export('xlsx')
 
     def export_votes_json(self):
         """匯出 JSON"""
@@ -635,7 +635,7 @@ class ImportVotingDataDialog(QDialog):
         file_group = QGroupBox("選擇文件")
         file_layout = QHBoxLayout()
         self.file_edit = QLineEdit()
-        self.file_edit.setPlaceholderText("選擇 CSV 或 JSON 文件…")
+        self.file_edit.setPlaceholderText("選擇 XLSX 或 JSON 文件…")
         self.file_edit.setReadOnly(True)
         file_layout.addWidget(self.file_edit)
         browse_btn = QPushButton("瀏覽…")
@@ -685,7 +685,7 @@ class ImportVotingDataDialog(QDialog):
     def _browse_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "選擇投票數據文件", "",
-            "支持的格式 (*.csv *.json);;CSV 檔案 (*.csv);;JSON 檔案 (*.json)"
+            "支持的格式 (*.xlsx *.json);;Excel 檔案 (*.xlsx);;JSON 檔案 (*.json)"
         )
         if path:
             self.file_edit.setText(path)
