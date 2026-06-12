@@ -12,6 +12,7 @@ from PyQt6.QtGui import QIcon, QFont
 from src.backend.database import Database
 from src.backend.config_manager import ConfigManager
 from src.backend.check_in_printer import CheckInPrinter
+from src.backend.voting_ballot_printer import VotingBallotPrinter
 from src.backend.barcode_generator import BarcodeGenerator
 from src.ui.check_in_window import CheckInWindow
 from src.ui.voting_window import VotingWindow
@@ -215,15 +216,68 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {str(e)}")
 
     def print_voting_ballots(self):
-        """打印投票單 PDF"""
+        """打印投票單 PDF - 格式：第幾案 項目名稱 描述 住戶條碼 一張A4紙 印8張投票單"""
         try:
-            QMessageBox.information(
-                self, "投票單打印",
-                "投票單打印功能即將推出"
+            # 從數據庫獲取所有投票項目
+            voting_items = self.db.get_all_voting_items()
+            
+            if not voting_items:
+                QMessageBox.warning(self, "警告", "沒有投票項目，無法生成投票單")
+                return
+            
+            # 從數據庫獲取所有住戶
+            households = self.db.get_all_households()
+            
+            if not households:
+                QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成投票單")
+                return
+
+            # 構建投票數據
+            voting_data = []
+            for item in voting_items:
+                voting_data.append({
+                    'case_number': item['case_number'],
+                    'name': item['name'],
+                    'description': item.get('description', ''),
+                    'households': households
+                })
+
+            print(f"\n📋 準備生成投票單:")
+            print(f"   投票案號數: {len(voting_data)}")
+            print(f"   住戶數: {len(households)}")
+            print(f"   總投票單數: {len(voting_data) * len(households)}")
+
+            # 選擇輸出位置
+            output_dir = QFileDialog.getExistingDirectory(
+                self,
+                "選擇投票單輸出目錄",
+                "exports/voting_ballots"
             )
-            # TODO: 實現投票單 PDF 生成功能
+
+            if not output_dir:
+                return
+
+            # 初始化投票單打印機
+            printer = VotingBallotPrinter(output_dir=output_dir)
+
+            # 生成 PDF 投票單
+            pdf_filename = "voting_ballots.pdf"
+            pdf_path = printer.generate_pdf(voting_data, filename=pdf_filename)
+
+            total_ballots = len(voting_data) * len(households)
+            QMessageBox.information(
+                self, "成功",
+                f"投票單已生成完成！\n\n"
+                f"📄 PDF 投票單: {pdf_filename}\n"
+                f"投票案號: {len(voting_data)} 個\n"
+                f"住戶: {len(households)} 個\n"
+                f"總投票單: {total_ballots} 張\n\n"
+                f"位置: {output_dir}"
+            )
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成投票單失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def generate_barcodes(self):
         """生成條碼圖片"""
