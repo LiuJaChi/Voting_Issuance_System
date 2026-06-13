@@ -24,21 +24,17 @@ from html import escape
 class Database:
     """SQLite 數據庫管理類"""
 
-    def __init__(self, db_path: str = "data/votes.db"):
-        """初始化數據庫連接"""
+    def __init__(self, db_path: str = "data/votes.db", config_manager=None):
+        """初始化數據庫連接
+        
+        Args:
+            db_path: 數據庫文件路徑
+            config_manager: 配置管理器實例，用於獲取系統配置（預期人數等）
+        """
         self.db_path = db_path
+        self.config_manager = config_manager
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
-        
-        # 導入 ConfigManager（避免循環導入，延遲導入）
-        self._config_manager = None
-
-    def _get_config_manager(self):
-        """延遲導入 ConfigManager 以避免循環導入"""
-        if self._config_manager is None:
-            from src.backend.config_manager import ConfigManager
-            self._config_manager = ConfigManager()
-        return self._config_manager
 
     def get_connection(self):
         """獲取數據庫連接"""
@@ -260,38 +256,38 @@ class Database:
             return False
 
     def get_check_in_stats(self) -> Dict:
-        """
-        獲取報到統計
+        """獲取報到統計 - 使用系統配置的預期人數
         
-        使用配置中的「預期參與人數」而不是實際住戶數
-        返回字段：
-        - expected_total: 預期出席人數（來自配置）
-        - checked_in: 已報到人數
-        - not_checked_in: 未報到人數
-        - percentage: 報到百分比
-        - total_expected: 同 expected_total（向後相容）
+        Returns:
+            包含以下鍵值的字典：
+            - total_expected: 預期出席人數（來自系統配置）
+            - checked_in: 已報到人數
+            - not_checked_in: 未報到人數
+            - checked_in_percentage: 出席百分比
         """
-        config_manager = self._get_config_manager()
-        expected_total = config_manager.get_config('total_participants', 0)
-        
         conn = self.get_connection()
         cursor = conn.cursor()
 
+        # 獲取預期人數（從配置管理器或數據庫中的住戶總數）
+        if self.config_manager:
+            total_expected = self.config_manager.get_config('total_participants', 0)
+        else:
+            # 如果沒有配置管理器，使用住戶總數作為備選
+            cursor.execute("SELECT COUNT(*) FROM households")
+            total_expected = cursor.fetchone()[0]
+
+        # 獲取已報到人數
         cursor.execute("SELECT COUNT(*) FROM check_in_records")
         checked_in = cursor.fetchone()[0]
 
         conn.close()
 
-        not_checked_in = expected_total - checked_in
-        percentage = (checked_in / expected_total * 100) if expected_total > 0 else 0
-
         return {
-            'expected_total': expected_total,
-            'total_expected': expected_total,  # 向後相容
+            'total_expected': total_expected,
+            'total_households': total_expected,  # 向後相容性
             'checked_in': checked_in,
-            'not_checked_in': not_checked_in,
-            'percentage': percentage,
-            'checked_in_percentage': percentage  # 向後相容
+            'not_checked_in': total_expected - checked_in,
+            'checked_in_percentage': (checked_in / total_expected * 100) if total_expected > 0 else 0
         }
 
     def get_check_in_area_stats(self) -> Dict:
@@ -299,7 +295,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # 總面積（基於已導入的住戶）
+        # 總面積
         cursor.execute("SELECT SUM(share_amount) FROM households")
         total_area = cursor.fetchone()[0] or 0.0
 
@@ -318,8 +314,7 @@ class Database:
             'total_area': total_area,
             'checked_in_area': checked_in_area,
             'not_checked_in_area': total_area - checked_in_area,
-            'area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0,
-            'checked_in_area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0  # 向後相容
+            'checked_in_area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0
         }
 
     def is_checked_in(self, household_id: str) -> bool:
