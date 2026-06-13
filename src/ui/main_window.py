@@ -62,17 +62,19 @@ class MainWindow(QMainWindow):
 
         main_layout = QVBoxLayout()
 
-        # 標題列：左側放標題文字
+        # 標題列：置中放標題文字
         header_layout = QHBoxLayout()
 
-        # 標題 - 從配置讀取系統名稱
+        # 標題 - 從配置讀取系統名稱，置中顯示
+        header_layout.addStretch()
+        
         system_name = self.config_manager.get_config('system_name', '投票系統')
         self.title_label = QLabel(system_name)
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addWidget(self.title_label)
 
         header_layout.addStretch()
