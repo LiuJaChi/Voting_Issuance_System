@@ -325,7 +325,7 @@ class VotingWindow(QWidget):
             # 獲取報到統計
             check_in_stats = self.db.get_check_in_stats()
             checked_in_count = check_in_stats['checked_in']
-            total_count = check_in_stats['total_expected']
+            total_count = check_in_stats['expected_total']
             
             # 建立報到戶號映射表（用於快速查詢），同時取得面積(坪)
             conn = self.db.get_connection()
