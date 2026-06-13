@@ -738,7 +738,7 @@ class Database:
             return ""
 
     def import_check_in_data(self, file_path: str, mode: str = 'merge') -> Dict:
-        """匯入報到記錄（支援 XLSX / CSV）"""
+        """匯入報到記錄（支援 XLSX / CSV，面積欄位僅做格式驗證）"""
         result = {
             'total_records': 0,
             'success_count': 0,
@@ -867,10 +867,11 @@ class Database:
                     continue
 
                 try:
+                    # 面積欄位僅用於資料格式驗證，報到表實際只寫入戶號與報到時間
                     float(share_text)
                 except (TypeError, ValueError):
                     result['failed_count'] += 1
-                    result['errors'].append(f"第 {row_idx} 行: 面積(坪) '{share_value}' 不是有效數字")
+                    result['errors'].append(f"第 {row_idx} 行: 面積(坪) '{share_value}' 不是有效數字（僅用於驗證）")
                     continue
 
                 try:
