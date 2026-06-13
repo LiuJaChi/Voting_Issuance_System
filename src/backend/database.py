@@ -2,6 +2,7 @@
 SQLite 數據庫管理模塊
 """
 import json
+import csv
 import sqlite3
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -735,6 +736,185 @@ class Database:
         except Exception as e:
             print(f"✗ 投票數據匯出失敗: {e}")
             return ""
+
+    def import_check_in_data(self, file_path: str, mode: str = 'merge') -> Dict:
+        """匯入報到記錄（支援 XLSX / CSV）"""
+        result = {
+            'total_records': 0,
+            'success_count': 0,
+            'failed_count': 0,
+            'duplicate_count': 0,
+            'errors': [],
+            'messages': []
+        }
+
+        def normalize_time(value):
+            if isinstance(value, datetime):
+                return value.strftime('%Y-%m-%d %H:%M:%S')
+
+            text = str(value or '').strip()
+            if not text:
+                raise ValueError("報到時間不可為空")
+
+            for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M:%S', '%Y/%m/%d %H:%M'):
+                try:
+                    dt = datetime.strptime(text, fmt)
+                    return dt.strftime('%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    continue
+
+            try:
+                return datetime.fromisoformat(text).strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError as exc:
+                raise ValueError("報到時間格式錯誤，應為 YYYY-MM-DD HH:MM:SS") from exc
+
+        def find_column(field_names, keywords):
+            for idx, name in enumerate(field_names):
+                lowered = str(name or '').strip().lower()
+                if any(keyword in lowered for keyword in keywords):
+                    return idx
+            return None
+
+        try:
+            if mode not in ('replace', 'merge'):
+                result['errors'].append("匯入模式必須是 'replace' 或 'merge'")
+                return result
+
+            suffix = Path(file_path).suffix.lower()
+            rows = []
+
+            if suffix == '.xlsx':
+                wb = load_workbook(file_path, data_only=True)
+                ws = wb.active
+                headers = [cell.value for cell in ws[1]]
+
+                household_col = find_column(headers, ['household_id', '戶號'])
+                share_col = find_column(headers, ['share_amount', '面積', '坪'])
+                checked_at_col = find_column(headers, ['checked_in_at', '報到時間', '簽到時間'])
+
+                if household_col is None or share_col is None or checked_at_col is None:
+                    result['errors'].append("欄位不足，需包含: 戶號、面積(坪)、報到時間")
+                    return result
+
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    if not row:
+                        continue
+                    row_list = list(row)
+                    while len(row_list) <= max(household_col, share_col, checked_at_col):
+                        row_list.append(None)
+                    rows.append((row_idx, row_list[household_col], row_list[share_col], row_list[checked_at_col]))
+
+            elif suffix == '.csv':
+                with open(file_path, 'r', encoding='utf-8-sig', newline='') as f:
+                    reader = csv.DictReader(f)
+                    if not reader.fieldnames:
+                        result['errors'].append("CSV 檔案缺少標題列")
+                        return result
+
+                    headers = reader.fieldnames
+                    household_col = find_column(headers, ['household_id', '戶號'])
+                    share_col = find_column(headers, ['share_amount', '面積', '坪'])
+                    checked_at_col = find_column(headers, ['checked_in_at', '報到時間', '簽到時間'])
+
+                    if household_col is None or share_col is None or checked_at_col is None:
+                        result['errors'].append("欄位不足，需包含: 戶號、面積(坪)、報到時間")
+                        return result
+
+                    household_key = headers[household_col]
+                    share_key = headers[share_col]
+                    checked_key = headers[checked_at_col]
+
+                    for row_idx, row in enumerate(reader, start=2):
+                        rows.append((row_idx, row.get(household_key), row.get(share_key), row.get(checked_key)))
+            else:
+                result['errors'].append("僅支援 .xlsx 或 .csv 檔案")
+                return result
+
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            if mode == 'replace':
+                cursor.execute("DELETE FROM check_in_records")
+
+            cursor.execute("SELECT household_id FROM households")
+            valid_households = {r[0] for r in cursor.fetchall()}
+
+            cursor.execute("SELECT household_id FROM check_in_records")
+            existing_checked_in = {r[0] for r in cursor.fetchall()}
+            file_seen = set()
+
+            for row_idx, household_value, share_value, checked_value in rows:
+                household_id = str(household_value or '').strip()
+                share_text = str(share_value or '').strip()
+                checked_text = str(checked_value or '').strip()
+
+                if not household_id and not share_text and not checked_text:
+                    continue
+
+                result['total_records'] += 1
+
+                if not household_id:
+                    result['failed_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 戶號不可為空")
+                    continue
+
+                if household_id not in valid_households:
+                    result['failed_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 戶號 '{household_id}' 不存在於系統")
+                    continue
+
+                try:
+                    float(share_value)
+                except (TypeError, ValueError):
+                    result['failed_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 面積(坪) '{share_value}' 不是有效數字")
+                    continue
+
+                try:
+                    checked_in_at = normalize_time(checked_value)
+                except ValueError as e:
+                    result['failed_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: {str(e)}")
+                    continue
+
+                if household_id in file_seen:
+                    result['failed_count'] += 1
+                    result['duplicate_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 戶號 '{household_id}' 在檔案中重複")
+                    continue
+
+                if mode == 'merge' and household_id in existing_checked_in:
+                    result['failed_count'] += 1
+                    result['duplicate_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 戶號 '{household_id}' 已有報到記錄（merge 模式略過）")
+                    continue
+
+                try:
+                    cursor.execute("""
+                        INSERT INTO check_in_records (household_id, checked_in_at)
+                        VALUES (?, ?)
+                    """, (household_id, checked_in_at))
+                    result['success_count'] += 1
+                    file_seen.add(household_id)
+                    existing_checked_in.add(household_id)
+                except sqlite3.IntegrityError:
+                    result['failed_count'] += 1
+                    result['duplicate_count'] += 1
+                    result['errors'].append(f"第 {row_idx} 行: 戶號 '{household_id}' 報到記錄重複")
+
+            conn.commit()
+            conn.close()
+
+            result['messages'].append(
+                f"匯入完成：成功 {result['success_count']} 筆，失敗 {result['failed_count']} 筆"
+            )
+            if result['duplicate_count'] > 0:
+                result['messages'].append(f"其中重複 {result['duplicate_count']} 筆")
+            return result
+
+        except Exception as e:
+            result['errors'].append(f"匯入失敗: {str(e)}")
+            return result
 
     def import_voting_data(self, file_path: str, mode: str = 'merge') -> Dict:
         """匯入投票數據
