@@ -112,12 +112,12 @@ class MainWindow(QMainWindow):
         items_action.triggered.connect(self.open_voting_items_dialog)
 
         # 打印菜單
-        print_menu = menubar.addMenu("打印")
+        print_menu = menubar.addMenu("列印")
 
-        check_in_print_action = print_menu.addAction("打印報到單 PDF")
+        check_in_print_action = print_menu.addAction("印報到單 PDF")
         check_in_print_action.triggered.connect(self.print_check_in_ballots)
 
-        ballot_print_action = print_menu.addAction("打印投票單 PDF")
+        ballot_print_action = print_menu.addAction("印投票單 PDF")
         ballot_print_action.triggered.connect(self.print_voting_ballots)
 
         print_menu.addSeparator()
