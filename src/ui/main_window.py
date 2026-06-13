@@ -1,5 +1,5 @@
 """
-主窗口 UI 類
+投票系統 UI 主窗口
 """
 import os
 import traceback
@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         
         # 存儲標題標籤以便後續更新
         self.title_label = None
+        self.results_window = None  # 初始化 results_window 為 None
 
         self.init_ui()
 
@@ -182,104 +183,77 @@ class MainWindow(QMainWindow):
         """打開投票項目管理對話框"""
         dialog = VotingItemDialog(self)
         dialog.exec()
+        # 刷新投票窗口的投票項目
         self.voting_window.load_voting_items()
 
     def print_check_in_ballots(self):
-        """打印報到單 PDF - 使用戶號作為條碼內容"""
+        """生成報到單 PDF"""
         try:
-            # 從數據庫獲取所有住戶
+            # 獲取所有住戶
             households = self.db.get_all_households()
-            
+
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成報到單")
                 return
 
-            # 構建住戶數據字典列表 - 使用戶號作為條碼內容
-            households_for_pdf = []
-            for h in households:
-                households_for_pdf.append({
-                    'household_id': h['household_id'],
-                    'name': h['name'],
-                    'share_amount': h.get('share_amount', 0.0),
-                    'barcode': h['household_id']  # 使用戶號作為條碼內容
-                })
-
-            # 選擇輸出位置
+            # 選擇輸出目錄
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "選擇報到單輸出目錄",
-                "exports/check_in_ballots"
+                "選擇輸出目錄",
+                "exports"
             )
 
             if not output_dir:
                 return
 
-            # 初始化打印機
+            # 生成 PDF
             printer = CheckInPrinter(output_dir=output_dir)
-
-            # 生成 PDF 報到單
-            pdf_filename = "check_in_ballots.pdf"
-            pdf_path = printer.generate_pdf(households_for_pdf, filename=pdf_filename)
+            pdf_filename = printer.generate_check_in_ballots(households)
 
             QMessageBox.information(
                 self, "成功",
                 f"報到單已生成完成！\n\n"
-                f"📄 PDF 報到單: {pdf_filename}\n\n"
+                f"📄 PDF 報到單: {pdf_filename}\n"
+                f"住戶: {len(households)} 個\n"
+                f"總報到單: {len(households)} 張\n\n"
                 f"位置: {output_dir}"
             )
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def print_voting_ballots(self):
-        """打印投票單 PDF - 格式：第幾案 項目名稱 描述 住戶條碼 一張A4紙 印8張投票單"""
+        """生成投票單 PDF"""
         try:
-            # 從數據庫獲取所有投票項目
-            voting_items = self.db.get_all_voting_items()
-            
-            if not voting_items:
+            # 獲取所有投票項目
+            voting_data = self.db.get_all_voting_items()
+            households = self.db.get_all_households()
+
+            if not voting_data:
                 QMessageBox.warning(self, "警告", "沒有投票項目，無法生成投票單")
                 return
-            
-            # 從數據庫獲取所有住戶
-            households = self.db.get_all_households()
-            
+
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成投票單")
                 return
 
-            # 構建投票數據
-            voting_data = []
-            for item in voting_items:
-                voting_data.append({
-                    'case_number': item['case_number'],
-                    'name': item['name'],
-                    'description': item.get('description', ''),
-                    'households': households
-                })
-
-            print(f"\n📋 準備生成投票單:")
-            print(f"   投票案號數: {len(voting_data)}")
-            print(f"   住戶數: {len(households)}")
-            print(f"   總投票單數: {len(voting_data) * len(households)}")
-
-            # 選擇輸出位置
+            # 選擇輸出目錄
             output_dir = QFileDialog.getExistingDirectory(
                 self,
-                "選擇投票單輸出目錄",
-                "exports/voting_ballots"
+                "選擇輸出目錄",
+                "exports"
             )
 
             if not output_dir:
                 return
 
-            # 初始化投票單打印機
+            # 生成 PDF
             printer = VotingBallotPrinter(output_dir=output_dir)
-
-            # 生成 PDF 投票單
-            pdf_filename = "voting_ballots.pdf"
-            pdf_path = printer.generate_pdf(voting_data, filename=pdf_filename)
+            pdf_filename = printer.generate_voting_ballots(voting_data, households)
 
             total_ballots = len(voting_data) * len(households)
+
             QMessageBox.information(
                 self, "成功",
                 f"投票單已生成完成！\n\n"
@@ -393,5 +367,7 @@ class MainWindow(QMainWindow):
             self.db.clear_all_data()
             self.check_in_window.refresh_check_in_list()
             self.voting_window.load_voting_items()
-            self.results_window.refresh_results()
+            # 只有在 results_window 存在時才刷新
+            if self.results_window is not None:
+                self.results_window.refresh_results()
             QMessageBox.information(self, "成功", "數據已清空")
