@@ -2,6 +2,7 @@
 主窗口 UI 類
 """
 import os
+import traceback
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -141,6 +142,9 @@ class MainWindow(QMainWindow):
 
         export_action = data_menu.addAction("導出數據")
         export_action.triggered.connect(self.export_all_data)
+
+        import_action = data_menu.addAction("導入數據")
+        import_action.triggered.connect(self.open_import_dialog)
 
         clear_action = data_menu.addAction("清空數據")
         clear_action.triggered.connect(self.clear_all_data)
@@ -329,13 +333,55 @@ class MainWindow(QMainWindow):
     def export_all_data(self):
         """導出所有數據"""
         try:
-            export_path = self.db.export_data()
-            if export_path:
-                QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {export_path}")
+            file_path, selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "導出數據",
+                "exports/data.json",
+                "JSON 文件 (*.json);;Excel 文件 (*.xlsx)"
+            )
+
+            if not file_path:
+                return
+
+            if selected_filter == "Excel 文件 (*.xlsx)" or file_path.endswith('.xlsx'):
+                export_path = self.db.export_voting_data(file_path)
+                if export_path:
+                    QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {export_path}")
+                else:
+                    QMessageBox.critical(self, "錯誤", "數據導出失敗")
             else:
-                QMessageBox.critical(self, "錯誤", "數據導出失敗")
+                if not file_path.endswith('.json'):
+                    file_path += '.json'
+                success = self.db.export_data(file_path)
+                if success:
+                    QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {file_path}")
+                else:
+                    QMessageBox.critical(self, "錯誤", "數據導出失敗")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"數據導出失敗: {str(e)}")
+            QMessageBox.critical(self, "錯誤", f"數據導出失敗: {str(e)}\n\n{traceback.format_exc()}")
+
+    def open_import_dialog(self):
+        """打開導入數據對話框"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "導入數據",
+                "",
+                "JSON 文件 (*.json)"
+            )
+
+            if not file_path:
+                return
+
+            success = self.db.import_json_data(file_path)
+            if success:
+                self.check_in_window.refresh_check_in_list()
+                self.voting_window.load_voting_items()
+                QMessageBox.information(self, "成功", f"📥 數據已導入\n\n來源: {file_path}")
+            else:
+                QMessageBox.critical(self, "錯誤", "數據導入失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"數據導入失敗: {str(e)}\n\n{traceback.format_exc()}")
 
     def clear_all_data(self):
         """清空所有數據"""

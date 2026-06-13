@@ -888,6 +888,71 @@ class Database:
             print(f"✗ 數據導出失敗: {e}")
             return False
 
+    def import_json_data(self, file_path: str) -> bool:
+        """從 JSON 文件導入所有數據（由 export_data() 導出的格式）
+
+        Args:
+            file_path: JSON 文件路徑
+
+        Returns:
+            導入成功返回 True，失敗返回 False
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            # 導入住戶數據
+            for household in data.get('households', []):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO households
+                        (household_id, name, share_amount, created_at)
+                    VALUES (:household_id, :name, :share_amount, :created_at)
+                """, household)
+
+            # 導入報到記錄
+            for record in data.get('check_in_records', []):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO check_in_records
+                        (household_id, checked_in_at, device_id)
+                    VALUES (:household_id, :checked_in_at, :device_id)
+                """, record)
+
+            # 導入條碼映射
+            for mapping in data.get('barcode_mappings', []):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO barcode_mapping
+                        (household_id, barcode_data, created_at)
+                    VALUES (:household_id, :barcode_data, :created_at)
+                """, mapping)
+
+            # 導入投票項目
+            for item in data.get('voting_items', []):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO voting_items
+                        (case_number, name, description, vote_type, pass_percentage, created_at)
+                    VALUES (:case_number, :name, :description, :vote_type, :pass_percentage, :created_at)
+                """, item)
+
+            # 導入投票記錄
+            for vote in data.get('votes', []):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO votes
+                        (household_id, case_number, vote, device_id, voted_at)
+                    VALUES (:household_id, :case_number, :vote, :device_id, :voted_at)
+                """, vote)
+
+            conn.commit()
+            conn.close()
+
+            print(f"✓ 數據已從 {file_path} 導入")
+            return True
+        except Exception as e:
+            print(f"✗ 數據導入失敗: {e}")
+            return False
+
     def export_voting_results_pdf(self, export_path: str = None) -> str:
         """匯出投票結果為 PDF（支持繁體中文）
         
