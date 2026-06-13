@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Jun 13 11:22:00 2026
-
-@author: USER
-"""
-
 """
 報到窗口 UI 類
 """
@@ -373,7 +366,7 @@ class CheckInWindow(QWidget):
             return
         
         # 執行報到
-        if self.db.check_in_household(raw_input):
+        if self.db.add_check_in(raw_input):
             self.last_checked_in_household_id = raw_input
             self.barcode_input.clear()
             self.barcode_input.setFocus()
@@ -393,18 +386,7 @@ class CheckInWindow(QWidget):
         Returns:
             True 如果已報到，False 如果尚未報到
         """
-        conn = self.db.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT checked_in_at FROM check_in_records 
-            WHERE household_id = ?
-        """, (household_id,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        return result is not None
+        return self.db.is_checked_in(household_id)
     
     def refresh_check_in_list(self):
         """刷新報到列表、圖表和面積統計"""
