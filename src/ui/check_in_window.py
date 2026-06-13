@@ -1,6 +1,8 @@
 """
 報到窗口 UI 類
 """
+import os
+import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -11,20 +13,75 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from matplotlib.font_manager import FontProperties
+from matplotlib.font_manager import FontProperties, fontManager
+import matplotlib.pyplot as plt
 import sqlite3
 
 from src.backend.database import Database
 
+# 模組級別儲存已偵測到的中文字體路徑
+_chinese_font_path = None
+
 
 def setup_chinese_font():
-    """設置中文字體支持"""
-    try:
-        import matplotlib.pyplot as plt
-        plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Microsoft YaHei']
-        plt.rcParams['axes.unicode_minus'] = False
-    except Exception as e:
-        print(f"字體設置失敗: {e}")
+    """設置中文字體支持，依平台自動偵測可用字體並向 matplotlib 註冊。"""
+    global _chinese_font_path
+
+    plt.rcParams['axes.unicode_minus'] = False
+
+    # 依平台列出候選字體路徑
+    if sys.platform == 'win32':
+        font_paths = [
+            'C:\\Windows\\Fonts\\msjh.ttc',    # 微軟正黑體
+            'C:\\Windows\\Fonts\\msjhbd.ttc',
+            'C:\\Windows\\Fonts\\msyh.ttc',    # 微軟雅黑
+            'C:\\Windows\\Fonts\\msyh.ttf',
+            'C:\\Windows\\Fonts\\kaiu.ttf',    # 標楷體
+            'C:\\Windows\\Fonts\\simhei.ttf',  # 黑體
+            'C:\\Windows\\Fonts\\simsun.ttc',  # 新宋體
+        ]
+    elif sys.platform == 'darwin':
+        font_paths = [
+            '/System/Library/Fonts/STHeiti Medium.ttc',
+            '/System/Library/Fonts/STHeiti Light.ttc',
+            '/System/Library/Fonts/PingFang.ttc',
+            '/Library/Fonts/Arial Unicode MS.ttf',
+        ]
+    else:  # Linux 及其他
+        font_paths = [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+            '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc',
+            '/usr/share/fonts/truetype/arphic/uming.ttc',
+            '/usr/share/fonts/truetype/arphic/ukai.ttc',
+        ]
+
+    for font_path in font_paths:
+        if os.path.exists(font_path):
+            try:
+                fontManager.addfont(font_path)
+                prop = FontProperties(fname=font_path)
+                font_name = prop.get_name()
+                current = plt.rcParams.get('font.sans-serif', [])
+                plt.rcParams['font.sans-serif'] = [font_name] + [f for f in current if f != font_name]
+                _chinese_font_path = font_path
+                return
+            except Exception as e:
+                print(f"字體載入失敗 {font_path}: {e}")
+                continue
+
+    # 找不到字體檔案時使用字體名稱備選清單
+    plt.rcParams['font.sans-serif'] = [
+        'Microsoft JhengHei', 'Microsoft YaHei', 'SimHei',
+        'STHeiti', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei',
+        'DejaVu Sans',
+    ]
+    print("未找到中文字體檔案，已設定系統字體備選清單")
+
 
 # 初始化中文字體
 setup_chinese_font()
@@ -195,6 +252,19 @@ class CheckInWindow(QWidget):
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         
+        # 取得中文字體屬性
+        chinese_font = None
+        if _chinese_font_path:
+            try:
+                chinese_font = FontProperties(fname=_chinese_font_path)
+            except Exception:
+                pass
+        if chinese_font is None:
+            try:
+                chinese_font = FontProperties(family=plt.rcParams['font.sans-serif'][0])
+            except Exception:
+                pass
+
         # 準備數據
         labels = []
         sizes = []
@@ -229,29 +299,24 @@ class CheckInWindow(QWidget):
             }
         )
         
-        # 美化文本
+        # 套用中文字體到所有文字元素
+        for text in texts:
+            if chinese_font:
+                text.set_fontproperties(chinese_font)
+            text.set_fontsize(8)
+            text.set_weight('bold')
+        
         for autotext in autotexts:
+            if chinese_font:
+                autotext.set_fontproperties(chinese_font)
             autotext.set_color('white')
             autotext.set_fontweight('bold')
             autotext.set_fontsize(9)
         
-        for text in texts:
-            text.set_fontsize(8)
-            text.set_weight('bold')
-        
-        # 設置標題並指定中文字體
-        try:
-            # 嘗試使用 SimHei 字體
-            chinese_font = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
-        except:
-            try:
-                # 如果不存在，嘗試系統預設中文字體
-                import matplotlib.pyplot as plt
-                chinese_font = FontProperties(family=plt.rcParams['font.sans-serif'][0])
-            except:
-                chinese_font = None
-        
-        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15, fontproperties=chinese_font)
+        # 設置標題
+        title_font = FontProperties(fname=_chinese_font_path, size=11, weight='bold') if _chinese_font_path else chinese_font
+        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15,
+                     fontproperties=title_font)
         
         self.figure.tight_layout()
         self.canvas.draw()
