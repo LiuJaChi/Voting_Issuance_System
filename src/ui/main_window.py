@@ -78,15 +78,17 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
 
         # LOGO 圖片（右上角）
-        logo_label = QLabel()
-        logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'logo.png')
+        logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'assets', 'logo.png')
+        logo_path = os.path.normpath(logo_path)
         if os.path.exists(logo_path):
             pixmap = QPixmap(logo_path)
-            pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(pixmap)
-            logo_label.setFixedSize(100, 100)
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(logo_label)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                logo_label = QLabel()
+                logo_label.setPixmap(pixmap)
+                logo_label.setFixedSize(100, 100)
+                logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                header_layout.addWidget(logo_label)
 
         main_layout.addLayout(header_layout)
 
