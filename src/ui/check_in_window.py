@@ -419,7 +419,7 @@ class CheckInWindow(QWidget):
                 self.progress_bar.setValue(0)
             
             # 更新圖表
-            not_checked_in = stats.get('not_checked_in', total - checked_in)
+            not_checked_in = stats.get('not_checked_in', 0)
             self.create_pie_chart(checked_in, not_checked_in)
         
         # 計算面積統計
