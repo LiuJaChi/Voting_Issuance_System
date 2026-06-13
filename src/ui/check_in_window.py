@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QProgressBar,
     QMessageBox, QHeaderView, QAbstractItemView
 )
-from PyQt6.QtGui import QColor, QFont, QPixmap
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import sqlite3
@@ -37,6 +37,8 @@ class CheckInWindow(QWidget):
         """初始化報到窗口"""
         super().__init__(parent)
         self.db = Database()
+        self.last_checked_in_household_id = None  # 記錄最後一筆報到的戶號
+        
         self.init_ui()
     
     def init_ui(self):
@@ -119,22 +121,46 @@ class CheckInWindow(QWidget):
         
         left_layout.addLayout(scan_layout)
         
-        # 報到表
+        # 報到記錄表 - 新增面積(坪)欄位
         self.check_in_table = QTableWidget()
         self.check_in_table.setColumnCount(4)
-        self.check_in_table.setHorizontalHeaderLabels(['戶號', '面積(坪)', '報到時間', '狀態'])
-        self.check_in_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.check_in_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.check_in_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.check_in_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.check_in_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.check_in_table.setHorizontalHeaderLabels(
+            ["戶號", "面積(坪)", "報到時間", "狀態"]
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self.check_in_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.Stretch
+        )
         left_layout.addWidget(self.check_in_table)
         
-        # ========== 右側布局 ==========
-        right_layout = QVBoxLayout()
+        # 按鈕佈局
+        button_layout = QHBoxLayout()
         
-        # 圖表標題和 LOGO 容器
-        chart_title_layout = QHBoxLayout()
+        refresh_button = QPushButton("刷新")
+        refresh_button.clicked.connect(self.refresh_check_in_list)
+        button_layout.addWidget(refresh_button)
+        
+        export_button = QPushButton("導出報到記錄")
+        export_button.clicked.connect(self.export_check_in_data)
+        button_layout.addWidget(export_button)
+        
+        clear_button = QPushButton("清空數據")
+        clear_button.clicked.connect(self.clear_check_in_data)
+        button_layout.addWidget(clear_button)
+        
+        button_layout.addStretch()
+        left_layout.addLayout(button_layout)
+        
+        # ========== 右側圖表佈局 ==========
+        right_layout = QVBoxLayout()
         
         chart_title = QLabel("報到統計")
         chart_title_font = QFont()
@@ -142,25 +168,7 @@ class CheckInWindow(QWidget):
         chart_title_font.setBold(True)
         chart_title.setFont(chart_title_font)
         chart_title.setStyleSheet("color: white;")
-        chart_title_layout.addWidget(chart_title)
-        
-        chart_title_layout.addStretch()
-        
-        # 右上角 LOGO
-        self.logo_label = QLabel()
-        logo_path = Path("assets/logo.png")
-        if logo_path.exists():
-            pixmap = QPixmap(str(logo_path))
-            # 縮放到 80x80 像素，保持寬高比
-            scaled_pixmap = pixmap.scaledToHeight(80, Qt.TransformationMode.SmoothTransformation)
-            self.logo_label.setPixmap(scaled_pixmap)
-            self.logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        else:
-            self.logo_label.setText("LOGO")
-            self.logo_label.setStyleSheet("color: white; font-size: 10pt;")
-        
-        chart_title_layout.addWidget(self.logo_label)
-        right_layout.addLayout(chart_title_layout)
+        right_layout.addWidget(chart_title)
         
         # 建立 Matplotlib 圖表
         self.figure = Figure(figsize=(5, 4), dpi=100)
@@ -237,45 +245,74 @@ class CheckInWindow(QWidget):
         self.canvas.draw()
     
     def process_check_in(self):
-        """處理報到"""
-        barcode_input = self.barcode_input.text().strip()
-        if not barcode_input:
+        """
+        處理報到 - 掃描戶號進行報到
+        
+        流程：
+        1. 清理掃描輸入
+        2. 查詢戶號
+        3. 執行報到
+        """
+        raw_input = self.barcode_input.text().strip()
+        
+        if not raw_input:
+            QMessageBox.warning(self, "警告", "請掃描或輸入戶號")
             return
         
-        try:
-            # 檢查住戶是否存在
-            household = self.db.get_household(barcode_input)
-            if not household:
-                QMessageBox.warning(self, "警告", f"戶號 {barcode_input} 不存在")
-                self.barcode_input.clear()
-                return
-            
-            # 檢查是否已報到
-            if self.is_household_checked_in(barcode_input):
-                QMessageBox.information(self, "提示", f"戶號 {barcode_input} 已報到")
-                self.barcode_input.clear()
-                return
-            
-            # 記錄報到
-            if self.db.check_in_household(barcode_input):
-                QMessageBox.information(self, "成功", f"戶號 {barcode_input} 報到成功")
-                self.refresh_check_in_list()
-                self.barcode_input.clear()
-            else:
-                QMessageBox.warning(self, "錯誤", "報到記錄失敗")
-        except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"報到失敗: {str(e)}")
-        finally:
+        # 查找住戶
+        household = self.db.get_household(raw_input)
+        if not household:
+            QMessageBox.critical(
+                self, "錯誤", 
+                f"戶號 {raw_input} 不存在"
+            )
+            self.barcode_input.clear()
+            self.barcode_input.setFocus()
+            return
+        
+        # 檢查是否已報到
+        if self.is_household_checked_in(raw_input):
+            QMessageBox.warning(
+                self, "重複報到", 
+                f"戶號 {raw_input} 已報到\n\n請掃描下一筆資料"
+            )
+            self.barcode_input.clear()
+            self.barcode_input.setFocus()
+            return
+        
+        # 執行報到
+        if self.db.check_in_household(raw_input):
+            self.last_checked_in_household_id = raw_input
+            self.barcode_input.clear()
+            self.barcode_input.setFocus()
+            self.refresh_check_in_list()
+        else:
+            QMessageBox.critical(self, "錯誤", "報到失敗，請聯繫管理員")
+            self.barcode_input.clear()
             self.barcode_input.setFocus()
     
     def is_household_checked_in(self, household_id: str) -> bool:
-        """檢查住戶是否已報到"""
+        """
+        檢查住戶是否已報到
+        
+        Args:
+            household_id: 戶號
+            
+        Returns:
+            True 如果已報到，False 如果尚未報到
+        """
         conn = self.db.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM check_in_records WHERE household_id = ?", (household_id,))
-        result = cursor.fetchone() is not None
+        
+        cursor.execute("""
+            SELECT checked_in_at FROM check_in_records 
+            WHERE household_id = ?
+        """, (household_id,))
+        
+        result = cursor.fetchone()
         conn.close()
-        return result
+        
+        return result is not None
     
     def refresh_check_in_list(self):
         """刷新報到列表、圖表和面積統計"""
@@ -311,22 +348,24 @@ class CheckInWindow(QWidget):
             self.checked_area_label.setText(f"已報到坪數: {checked_in_area:.2f} 坪")
             self.area_percentage_label.setText(f"坪數占比: {area_percentage:.2f}%")
         
-        # 清空表格
+        # 更新表格
         self.check_in_table.setRowCount(0)
         
-        # 從數據庫獲取報到記錄
         conn = self.db.get_connection()
         cursor = conn.cursor()
+        
+        # 查詢所有住戶及其報到信息和面積
         cursor.execute("""
-            SELECT c.household_id, COALESCE(h.share_amount, 0), c.checked_in_at
-            FROM check_in_records c
-            LEFT JOIN households h ON c.household_id = h.household_id
-            ORDER BY c.checked_in_at DESC
+            SELECT h.household_id, h.share_amount, c.checked_in_at
+            FROM households h
+            LEFT JOIN check_in_records c ON h.household_id = c.household_id
+            ORDER BY h.household_id
         """)
+        
         rows = cursor.fetchall()
         conn.close()
         
-        # 填充表格
+        # 黃色背景色
         yellow_brush = QColor(255, 255, 0)
         
         for row in rows:
@@ -357,9 +396,14 @@ class CheckInWindow(QWidget):
             # 狀態 - 已報到 或 尚未報到
             status = "✓ 已報到" if row[2] else "⊗ 尚未報到"
             status_item = QTableWidgetItem(status)
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            # 添加到表格
+            # 如果是最後一筆報到資料，設置黃色背景
+            if household_id == self.last_checked_in_household_id:
+                household_id_item.setBackground(yellow_brush)
+                area_item.setBackground(yellow_brush)
+                time_item.setBackground(yellow_brush)
+                status_item.setBackground(yellow_brush)
+            
             self.check_in_table.setItem(row_position, 0, household_id_item)
             self.check_in_table.setItem(row_position, 1, area_item)
             self.check_in_table.setItem(row_position, 2, time_item)
@@ -367,31 +411,32 @@ class CheckInWindow(QWidget):
     
     def export_check_in_data(self):
         """導出報到數據"""
-        try:
-            export_path = self.db.export_voting_data()
-            if export_path:
-                QMessageBox.information(self, "成功", f"報到數據已導出:\n{export_path}")
-            else:
-                QMessageBox.critical(self, "錯誤", "報到數據導出失敗")
-        except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"導出失敗: {str(e)}")
+        if self.db.export_data():
+            QMessageBox.information(self, "成功", "數據已導出到 exports/data.json")
+        else:
+            QMessageBox.critical(self, "錯誤", "數據導出失敗")
     
     def clear_check_in_data(self):
         """清空報到數據"""
         reply = QMessageBox.question(
             self,
             "確認",
-            "確定要清空所有報到數據嗎？",
+            "確定要清空所有報到數據嗎？\n此操作無法撤銷。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+        
         if reply == QMessageBox.StandardButton.Yes:
+            conn = self.db.get_connection()
+            cursor = conn.cursor()
+            
             try:
-                conn = self.db.get_connection()
-                cursor = conn.cursor()
                 cursor.execute("DELETE FROM check_in_records")
                 conn.commit()
                 conn.close()
+                
+                self.last_checked_in_household_id = None
                 self.refresh_check_in_list()
                 QMessageBox.information(self, "成功", "報到數據已清空")
-            except Exception as e:
+            except sqlite3.Error as e:
+                conn.close()
                 QMessageBox.critical(self, "錯誤", f"清空失敗: {str(e)}")
