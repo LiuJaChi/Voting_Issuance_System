@@ -8,7 +8,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -904,36 +904,31 @@ class Database:
         try:
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
 
-            # 建立 PDF 文檔
-            doc = SimpleDocTemplate(export_path, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm)
+            # 建立 PDF 文檔（橫向 A4，以容納 12 欄）
+            doc = SimpleDocTemplate(
+                export_path,
+                pagesize=landscape(A4),
+                topMargin=15*mm, bottomMargin=15*mm,
+                leftMargin=10*mm, rightMargin=10*mm
+            )
             story = []
 
             # 設置樣式
             styles = getSampleStyleSheet()
-            
-            # 標題樣式（使用中文字體）
+
+            # 標題樣式：白色字體，藍色底色
             title_style = ParagraphStyle(
                 'CustomTitle',
                 parent=styles['Heading1'],
                 fontName=self.chinese_font,
                 fontSize=16,
-                textColor=colors.HexColor('#1976D2'),
-                spaceAfter=12,
+                textColor=colors.white,
+                backColor=colors.HexColor('#1976D2'),
+                spaceAfter=6,
+                spaceBefore=4,
                 alignment=TA_CENTER
             )
-            
-            # 項目標題樣式
-            item_title_style = ParagraphStyle(
-                'ItemTitle',
-                parent=styles['Heading2'],
-                fontName=self.chinese_font,
-                fontSize=12,
-                textColor=colors.HexColor('#333333'),
-                spaceAfter=6,
-                spaceBefore=12,
-                alignment=TA_LEFT
-            )
-            
+
             # 時間戳樣式
             timestamp_style = ParagraphStyle(
                 'Timestamp',
@@ -944,26 +939,36 @@ class Database:
                 alignment=TA_CENTER,
                 spaceAfter=12
             )
-            
-            # 表格文字樣式
-            normal_style = ParagraphStyle(
-                'Normal',
+
+            # 表格標題列樣式（白色字體）
+            header_style = ParagraphStyle(
+                'TableHeader',
                 parent=styles['Normal'],
                 fontName=self.chinese_font,
-                fontSize=10
+                fontSize=9,
+                textColor=colors.white,
+                alignment=TA_CENTER
+            )
+
+            # 表格資料列樣式
+            normal_style = ParagraphStyle(
+                'TableNormal',
+                parent=styles['Normal'],
+                fontName=self.chinese_font,
+                fontSize=9,
+                alignment=TA_CENTER
             )
 
             # 標題
-            title = Paragraph("投票結果統計報告", title_style)
-            story.append(title)
+            story.append(Paragraph("投票結果統計報告", title_style))
+            story.append(Spacer(1, 6))
 
             # 時間戳
-            timestamp_para = Paragraph(
-                f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
+            story.append(Paragraph(
+                f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 timestamp_style
-            )
-            story.append(timestamp_para)
-            story.append(Spacer(1, 12))
+            ))
+            story.append(Spacer(1, 8))
 
             # 獲取所有投票項目
             voting_items = self.get_all_voting_items()
@@ -971,73 +976,110 @@ class Database:
             if not voting_items:
                 story.append(Paragraph("沒有投票項目資料", normal_style))
             else:
-                for item in voting_items:
-                    # 項目標題
-                    item_title = Paragraph(
-                        f"案號: {item['case_number']} - {item['name']}", 
-                        item_title_style
-                    )
-                    story.append(item_title)
-
-                    # 獲取投票結果
-                    stats = self.get_voting_statistics(item['case_number'])
-                    
-                    if not stats:
-                        story.append(Paragraph("無投票數據", normal_style))
-                        story.append(Spacer(1, 8))
-                        continue
-                    
-                    # 構建表格數據
-                    table_data = [
-                        [
-                            Paragraph('投票選項', normal_style),
-                            Paragraph('人數', normal_style),
-                            Paragraph('面積(坪)', normal_style),
-                            Paragraph('面積百分比', normal_style)
-                        ]
+                # 表格標題列（與 UI 欄位一致）
+                table_data = [
+                    [
+                        Paragraph('案號', header_style),
+                        Paragraph('項目名稱', header_style),
+                        Paragraph('同意', header_style),
+                        Paragraph('不同意', header_style),
+                        Paragraph('棄權', header_style),
+                        Paragraph('同意坪', header_style),
+                        Paragraph('不同意坪', header_style),
+                        Paragraph('棄權坪', header_style),
+                        Paragraph('同意%', header_style),
+                        Paragraph('不同意%', header_style),
+                        Paragraph('棄權%', header_style),
+                        Paragraph('進度', header_style),
                     ]
+                ]
 
-                    for vote_type in ['同意', '不同意', '棄權']:
-                        vote_stats = stats.get('by_vote', {}).get(vote_type, {})
-                        count = vote_stats.get('count', 0)
-                        area = vote_stats.get('area', 0.0)
-                        area_pct = vote_stats.get('area_percentage', 0.0)
-                        
-                        if count > 0 or area > 0:  # 只顯示有數據的行
-                            table_data.append([
-                                Paragraph(vote_type, normal_style),
-                                Paragraph(str(count), normal_style),
-                                Paragraph(f"{area:.2f}", normal_style),
-                                Paragraph(f"{area_pct:.2f}%", normal_style)
-                            ])
+                for item in voting_items:
+                    stats = self.get_voting_statistics(item['case_number'])
+                    vote_stats = stats.get('by_vote', {}) if stats else {}
 
-                    # 總計行
+                    agree_stats = vote_stats.get('同意', {})
+                    disagree_stats = vote_stats.get('不同意', {})
+                    abstain_stats = vote_stats.get('棄權', {})
+
+                    agree_count = agree_stats.get('count', 0)
+                    disagree_count = disagree_stats.get('count', 0)
+                    abstain_count = abstain_stats.get('count', 0)
+
+                    agree_area = agree_stats.get('area', 0.0)
+                    disagree_area = disagree_stats.get('area', 0.0)
+                    abstain_area = abstain_stats.get('area', 0.0)
+
+                    agree_area_pct = agree_stats.get('area_percentage', 0.0)
+                    disagree_area_pct = disagree_stats.get('area_percentage', 0.0)
+                    abstain_area_pct = abstain_stats.get('area_percentage', 0.0)
+                    case_progress = stats.get('overall_count_percentage', 0.0) if stats else 0.0
+
                     table_data.append([
-                        Paragraph('合計', normal_style),
-                        Paragraph(str(stats.get('total_voted_households', 0)), normal_style),
-                        Paragraph(f"{stats.get('total_voted_area', 0.0):.2f}", normal_style),
-                        Paragraph("100.00%", normal_style)
+                        Paragraph(item['case_number'], normal_style),
+                        Paragraph(item['name'], normal_style),
+                        Paragraph(str(agree_count), normal_style),
+                        Paragraph(str(disagree_count), normal_style),
+                        Paragraph(str(abstain_count), normal_style),
+                        Paragraph(f"{agree_area:.2f}", normal_style),
+                        Paragraph(f"{disagree_area:.2f}", normal_style),
+                        Paragraph(f"{abstain_area:.2f}", normal_style),
+                        Paragraph(f"{agree_area_pct:.2f}%", normal_style),
+                        Paragraph(f"{disagree_area_pct:.2f}%", normal_style),
+                        Paragraph(f"{abstain_area_pct:.2f}%", normal_style),
+                        Paragraph(f"{case_progress:.2f}%", normal_style),
                     ])
 
-                    # 建立表格
-                    table = Table(table_data, colWidths=[80, 60, 100, 100])
-                    table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('FONTNAME', (0, 0), (-1, 0), self.chinese_font),
-                        ('FONTSIZE', (0, 0), (-1, 0), 11),
-                        ('FONTNAME', (0, 1), (-1, -1), self.chinese_font),
-                        ('FONTSIZE', (0, 1), (-1, -1), 10),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#F5F5F5')])
-                    ]))
+                # 欄寬（橫向 A4 可用寬約 247mm）
+                # 案號, 項目名稱, 同意, 不同意, 棄權, 同意坪, 不同意坪, 棄權坪, 同意%, 不同意%, 棄權%, 進度
+                col_widths = [22*mm, 70*mm, 18*mm, 22*mm, 18*mm,
+                              22*mm, 25*mm, 22*mm, 20*mm, 22*mm, 20*mm, 20*mm]
 
-                    story.append(table)
-                    story.append(Spacer(1, 12))
+                # 欄索引常數
+                COL_AGREE       = 2   # 同意（人數）
+                COL_DISAGREE    = 3   # 不同意（人數）
+                COL_ABSTAIN     = 4   # 棄權（人數）
+                COL_AGREE_AREA  = 5   # 同意坪
+                COL_DIS_AREA    = 6   # 不同意坪
+                COL_ABS_AREA    = 7   # 棄權坪
+                COL_AGREE_PCT   = 8   # 同意%
+                COL_DIS_PCT     = 9   # 不同意%
+                COL_ABS_PCT     = 10  # 棄權%
+
+                table = Table(table_data, colWidths=col_widths)
+                num_rows = len(table_data)
+                table.setStyle(TableStyle([
+                    # 標題列：藍底白字
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('FONTNAME', (0, 0), (-1, 0), self.chinese_font),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                    ('TOPPADDING', (0, 0), (-1, 0), 6),
+                    # 資料列字體
+                    ('FONTNAME', (0, 1), (-1, -1), self.chinese_font),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    # 格線
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    # 資料列交替底色
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F5F5F5')]),
+                    # 同意欄（綠色）
+                    ('BACKGROUND', (COL_AGREE,      1), (COL_AGREE,      num_rows - 1), colors.HexColor('#C8E6C9')),
+                    ('BACKGROUND', (COL_AGREE_AREA, 1), (COL_AGREE_AREA, num_rows - 1), colors.HexColor('#C8E6C9')),
+                    ('BACKGROUND', (COL_AGREE_PCT,  1), (COL_AGREE_PCT,  num_rows - 1), colors.HexColor('#C8E6C9')),
+                    # 不同意欄（紅色）
+                    ('BACKGROUND', (COL_DISAGREE, 1), (COL_DISAGREE, num_rows - 1), colors.HexColor('#FFCDD2')),
+                    ('BACKGROUND', (COL_DIS_AREA, 1), (COL_DIS_AREA, num_rows - 1), colors.HexColor('#FFCDD2')),
+                    ('BACKGROUND', (COL_DIS_PCT,  1), (COL_DIS_PCT,  num_rows - 1), colors.HexColor('#FFCDD2')),
+                    # 棄權欄（黃色）
+                    ('BACKGROUND', (COL_ABSTAIN,  1), (COL_ABSTAIN,  num_rows - 1), colors.HexColor('#FFF9C4')),
+                    ('BACKGROUND', (COL_ABS_AREA, 1), (COL_ABS_AREA, num_rows - 1), colors.HexColor('#FFF9C4')),
+                    ('BACKGROUND', (COL_ABS_PCT,  1), (COL_ABS_PCT,  num_rows - 1), colors.HexColor('#FFF9C4')),
+                ]))
+
+                story.append(table)
 
             # 構建 PDF
             doc.build(story)
