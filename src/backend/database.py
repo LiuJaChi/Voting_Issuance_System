@@ -29,6 +29,16 @@ class Database:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
+        
+        # 導入 ConfigManager（避免循環導入，延遲導入）
+        self._config_manager = None
+
+    def _get_config_manager(self):
+        """延遲導入 ConfigManager 以避免循環導入"""
+        if self._config_manager is None:
+            from src.backend.config_manager import ConfigManager
+            self._config_manager = ConfigManager()
+        return self._config_manager
 
     def get_connection(self):
         """獲取數據庫連接"""
@@ -250,23 +260,38 @@ class Database:
             return False
 
     def get_check_in_stats(self) -> Dict:
-        """獲取報到統計"""
+        """
+        獲取報到統計
+        
+        使用配置中的「預期參與人數」而不是實際住戶數
+        返回字段：
+        - expected_total: 預期出席人數（來自配置）
+        - checked_in: 已報到人數
+        - not_checked_in: 未報到人數
+        - percentage: 報到百分比
+        - total_expected: 同 expected_total（向後相容）
+        """
+        config_manager = self._get_config_manager()
+        expected_total = config_manager.get_config('total_participants', 0)
+        
         conn = self.get_connection()
         cursor = conn.cursor()
-
-        cursor.execute("SELECT COUNT(*) FROM households")
-        total_households = cursor.fetchone()[0]
 
         cursor.execute("SELECT COUNT(*) FROM check_in_records")
         checked_in = cursor.fetchone()[0]
 
         conn.close()
 
+        not_checked_in = expected_total - checked_in
+        percentage = (checked_in / expected_total * 100) if expected_total > 0 else 0
+
         return {
-            'total_households': total_households,
+            'expected_total': expected_total,
+            'total_expected': expected_total,  # 向後相容
             'checked_in': checked_in,
-            'not_checked_in': total_households - checked_in,
-            'checked_in_percentage': (checked_in / total_households * 100) if total_households > 0 else 0
+            'not_checked_in': not_checked_in,
+            'percentage': percentage,
+            'checked_in_percentage': percentage  # 向後相容
         }
 
     def get_check_in_area_stats(self) -> Dict:
@@ -274,7 +299,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # 總面積
+        # 總面積（基於已導入的住戶）
         cursor.execute("SELECT SUM(share_amount) FROM households")
         total_area = cursor.fetchone()[0] or 0.0
 
@@ -293,7 +318,8 @@ class Database:
             'total_area': total_area,
             'checked_in_area': checked_in_area,
             'not_checked_in_area': total_area - checked_in_area,
-            'checked_in_area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0
+            'area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0,
+            'checked_in_area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0  # 向後相容
         }
 
     def is_checked_in(self, household_id: str) -> bool:
