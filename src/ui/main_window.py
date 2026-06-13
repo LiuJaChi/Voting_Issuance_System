@@ -72,10 +72,8 @@ class MainWindow(QMainWindow):
         title_font.setPointSize(16)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        header_layout.addWidget(self.title_label)
-
-        header_layout.addStretch()
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(self.title_label, 1)
 
         main_layout.addLayout(header_layout)
 
