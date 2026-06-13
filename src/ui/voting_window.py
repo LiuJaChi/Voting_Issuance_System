@@ -246,6 +246,11 @@ class VotingWindow(QWidget):
         export_xlsx_btn.clicked.connect(self.export_votes_xlsx)
         io_layout.addWidget(export_xlsx_btn)
 
+        export_pdf_btn = QPushButton("📄 匯出 PDF")
+        export_pdf_btn.setStyleSheet("background-color: #FF6F00; color: white; font-weight: bold; padding: 6px 14px;")
+        export_pdf_btn.clicked.connect(self.export_votes_pdf)
+        io_layout.addWidget(export_pdf_btn)
+
         export_json_btn = QPushButton("📤 匯出 JSON")
         export_json_btn.setStyleSheet("background-color: #0288D1; color: white; font-weight: bold; padding: 6px 14px;")
         export_json_btn.clicked.connect(self.export_votes_json)
@@ -740,6 +745,17 @@ class VotingWindow(QWidget):
                 QMessageBox.information(self, "成功", f"投票數據已匯出:\n{export_path}")
             else:
                 QMessageBox.critical(self, "錯誤", "投票數據匯出失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"匯出失敗: {str(e)}")
+
+    def export_votes_pdf(self):
+        """匯出投票結果為 PDF"""
+        try:
+            export_path = self.db.export_voting_results_pdf()
+            if export_path:
+                QMessageBox.information(self, "成功", f"投票結果 PDF 已匯出:\n{export_path}")
+            else:
+                QMessageBox.critical(self, "錯誤", "投票結果 PDF 匯出失敗")
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"匯出失敗: {str(e)}")
     

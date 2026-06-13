@@ -10,12 +10,23 @@
 """
 import sqlite3
 import json
+import os
+from html import escape
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 class Database:
@@ -727,6 +738,46 @@ class Database:
         )
         return thin_border
 
+    @staticmethod
+    def _init_pdf_fonts() -> Tuple[str, str]:
+        """初始化 PDF 中文字體，返回（正常字體, 粗體字體）名稱"""
+        cid_font_name = "STSong-Light"
+        try:
+            if cid_font_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(UnicodeCIDFont(cid_font_name))
+            return cid_font_name, cid_font_name
+        except Exception:
+            pass
+
+        font_paths = [
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/STHeiti Medium.ttf",
+            "C:\\Windows\\Fonts\\msyh.ttc",
+            "C:\\Windows\\Fonts\\msyh.ttf",
+            "C:\\Windows\\Fonts\\kaiu.ttf",
+        ]
+
+        for idx, font_path in enumerate(font_paths):
+            if not os.path.exists(font_path):
+                continue
+
+            font_name = f"VotingPdfFont{idx}"
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(font_name, font_path))
+            return font_name, font_name
+
+        return "Helvetica", "Helvetica-Bold"
+
+    @staticmethod
+    def _format_pdf_vote_cell(stats: Dict) -> str:
+        """格式化 PDF 表格中的投票統計欄位"""
+        return (
+            f"人數：{stats.get('count', 0)}<br/>"
+            f"坪數：{stats.get('area', 0.0):.2f}<br/>"
+            f"百分比：{stats.get('area_percentage', 0.0):.2f}%"
+        )
+
     def export_voting_data(self, export_path: str = None) -> str:
         """匯出所有投票數據為 XLSX 格式。
 
@@ -846,6 +897,101 @@ class Database:
             return export_path
         except Exception as e:
             print(f"✗ 投票數據匯出失敗: {e}")
+            return ''
+
+    def export_voting_results_pdf(self, export_path: str = None) -> str:
+        """匯出所有案件的投票結果為 PDF"""
+        if export_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            export_path = f"exports/voting_results_{timestamp}.pdf"
+
+        try:
+            font_name, font_bold_name = self._init_pdf_fonts()
+            generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            voting_items = self.get_all_voting_items()
+
+            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
+
+            doc = SimpleDocTemplate(
+                export_path,
+                pagesize=A4,
+                leftMargin=12 * mm,
+                rightMargin=12 * mm,
+                topMargin=34 * mm,
+                bottomMargin=16 * mm,
+            )
+
+            styles = getSampleStyleSheet()
+            centered_style = ParagraphStyle(
+                "VotingPdfCell",
+                parent=styles["BodyText"],
+                fontName=font_name,
+                fontSize=8.5,
+                leading=11,
+                alignment=TA_CENTER,
+            )
+            case_style = ParagraphStyle(
+                "VotingPdfCase",
+                parent=centered_style,
+                fontName=font_bold_name,
+            )
+
+            table_data = [[
+                Paragraph("案號", case_style),
+                Paragraph("項目名稱", case_style),
+                Paragraph("同意", case_style),
+                Paragraph("不同意", case_style),
+                Paragraph("棄權", case_style),
+            ]]
+
+            for item in voting_items:
+                stats = self.get_voting_statistics(item["case_number"])
+                by_vote = stats.get("by_vote", {})
+                table_data.append([
+                    Paragraph(escape(str(item["case_number"])), centered_style),
+                    Paragraph(escape(str(item["name"])), centered_style),
+                    Paragraph(self._format_pdf_vote_cell(by_vote.get("同意", {})), centered_style),
+                    Paragraph(self._format_pdf_vote_cell(by_vote.get("不同意", {})), centered_style),
+                    Paragraph(self._format_pdf_vote_cell(by_vote.get("棄權", {})), centered_style),
+                ])
+
+            table = Table(
+                table_data,
+                colWidths=[18 * mm, 45 * mm, 41 * mm, 41 * mm, 41 * mm],
+                repeatRows=1,
+            )
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), font_bold_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                ("LEADING", (0, 0), (-1, -1), 11),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#9E9E9E")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F4F7FB")]),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+
+            def draw_header_footer(canvas, _doc):
+                canvas.saveState()
+                canvas.setFont(font_bold_name, 14)
+                canvas.drawCentredString(A4[0] / 2, A4[1] - 18 * mm, "投票系統 - 投票結果統計")
+                canvas.setFont(font_name, 9)
+                canvas.drawCentredString(A4[0] / 2, A4[1] - 24 * mm, f"生成時間：{generated_at}")
+                canvas.setStrokeColor(colors.HexColor("#B0BEC5"))
+                canvas.line(_doc.leftMargin, A4[1] - 27 * mm, A4[0] - _doc.rightMargin, A4[1] - 27 * mm)
+                canvas.drawRightString(A4[0] - _doc.rightMargin, 10 * mm, f"第 {canvas.getPageNumber()} 頁")
+                canvas.restoreState()
+
+            elements = [Spacer(1, 2 * mm), table]
+            doc.build(elements, onFirstPage=draw_header_footer, onLaterPages=draw_header_footer)
+
+            print(f"✓ 投票結果 PDF 已匯出到: {export_path}（共 {len(voting_items)} 案）")
+            return export_path
+        except Exception as e:
+            print(f"✗ 投票結果 PDF 匯出失敗: {e}")
             return ''
 
     def validate_voting_data(self, data: List[Dict]) -> Tuple[List[Dict], List[str]]:
