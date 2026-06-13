@@ -48,6 +48,10 @@ class VotingWindow(QWidget):
         self.household_count_label.setStyleSheet("font-size: 11pt; font-weight: bold;")
         load_layout.addWidget(self.household_count_label)
         
+        self.total_area_label = QLabel("總坪數: 0.00 坪")
+        self.total_area_label.setStyleSheet("font-size: 11pt; font-weight: bold; color: #1976D2;")
+        load_layout.addWidget(self.total_area_label)
+        
         load_layout.addStretch()
         load_group.setLayout(load_layout)
         main_layout.addWidget(load_group)
@@ -157,22 +161,35 @@ class VotingWindow(QWidget):
         self.progress_bar.setValue(0)
         stats_layout.addWidget(self.progress_bar)
         
-        # 投票結果表 - 坪數百分比顯示（分母為出席住戶總坪數）
+        # 面積統計標籤列
+        area_stats_row = QHBoxLayout()
+        self.stats_total_area_label = QLabel("總坪數: 0.00 坪")
+        self.stats_total_area_label.setStyleSheet("font-weight: bold;")
+        area_stats_row.addWidget(self.stats_total_area_label)
+        
+        self.stats_voted_area_label = QLabel("已投票坪數: 0.00 坪")
+        self.stats_voted_area_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
+        area_stats_row.addWidget(self.stats_voted_area_label)
+        
+        self.stats_area_pct_label = QLabel("坪數占比: 0.00%")
+        self.stats_area_pct_label.setStyleSheet("font-weight: bold; color: #2196F3;")
+        area_stats_row.addWidget(self.stats_area_pct_label)
+        
+        area_stats_row.addStretch()
+        stats_layout.addLayout(area_stats_row)
+        
+        # 投票結果表 - 含坪數及坪數百分比（分母為出席住戶總坪數）
         self.vote_stats_table = QTableWidget()
-        self.vote_stats_table.setColumnCount(9)
+        self.vote_stats_table.setColumnCount(12)
         self.vote_stats_table.setHorizontalHeaderLabels(
-            ["案號", "項目名稱", "同意", "不同意", "棄權", 
+            ["案號", "項目名稱", "同意", "不同意", "棄權",
+             "同意坪", "不同意坪", "棄權坪",
              "同意%", "不同意%", "棄權%", "進度"]
         )
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.vote_stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        self.vote_stats_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        for col in range(2, 12):
+            self.vote_stats_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         stats_layout.addWidget(self.vote_stats_table)
         
         # 匯出 / 匯入按鈕列
@@ -259,20 +276,25 @@ class VotingWindow(QWidget):
             checked_in_count = check_in_stats['checked_in']
             total_count = check_in_stats['total_expected']
             
-            # 建立報到戶號映射表（用於快速查詢）
+            # 建立報到戶號映射表（用於快速查詢），同時取得面積(坪)
             conn = self.db.get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT DISTINCT household_id FROM check_in_records
+                SELECT DISTINCT c.household_id, COALESCE(h.share_amount, 0) as share_amount
+                FROM check_in_records c
+                LEFT JOIN households h ON c.household_id = h.household_id
             """)
             checked_in_records = cursor.fetchall()
             conn.close()
             
-            self.checked_in_households = {row['household_id'] for row in checked_in_records}
+            self.checked_in_households = {row['household_id']: row['share_amount'] for row in checked_in_records}
+            
+            total_area = sum(self.checked_in_households.values())
             
             self.household_count_label.setText(
                 f"已載入: {checked_in_count} / {total_count} 戶"
             )
+            self.total_area_label.setText(f"總坪數: {total_area:.2f} 坪")
             
             # 載入投票項目
             self.load_voting_items()
@@ -418,24 +440,7 @@ class VotingWindow(QWidget):
     
     def get_checked_in_total_area(self):
         """獲取出席住戶的總坪數"""
-        try:
-            if not self.checked_in_households:
-                return 0.0
-            
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            # 計算出席住戶的總坪數
-            placeholders = ','.join(['?' for _ in self.checked_in_households])
-            query = f"SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households WHERE household_id IN ({placeholders})"
-            cursor.execute(query, list(self.checked_in_households))
-            result = cursor.fetchone()
-            conn.close()
-            
-            return result['total_area'] if result else 0.0
-        except Exception as e:
-            print(f"獲取出席住戶總坪數失敗: {e}")
-            return 0.0
+        return sum(self.checked_in_households.values()) if self.checked_in_households else 0.0
     
     def refresh_vote_stats(self):
         """刷新投票統計 - 顯示坪數百分比（分母為出席住戶總坪數）"""
@@ -449,6 +454,9 @@ class VotingWindow(QWidget):
             checked_in_total_area = self.get_checked_in_total_area()
             
             total_households = len(self.checked_in_households)
+            
+            # 計算出席住戶總坪數並更新面積統計標籤
+            total_voted_area = 0.0
             
             for row_idx, case in enumerate(self.voting_items):
                 self.vote_stats_table.insertRow(row_idx)
@@ -499,6 +507,22 @@ class VotingWindow(QWidget):
                 abstain_item.setBackground(QColor("#FFF9C4"))
                 abstain_item.setForeground(QColor("black"))
                 
+                # 面積坪數數值列
+                agree_area_item = QTableWidgetItem(f"{agree_area:.2f}")
+                agree_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                agree_area_item.setBackground(QColor("#C8E6C9"))
+                agree_area_item.setForeground(QColor("black"))
+                
+                disagree_area_item = QTableWidgetItem(f"{disagree_area:.2f}")
+                disagree_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                disagree_area_item.setBackground(QColor("#FFCDD2"))
+                disagree_area_item.setForeground(QColor("black"))
+                
+                abstain_area_item = QTableWidgetItem(f"{abstain_area:.2f}")
+                abstain_area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                abstain_area_item.setBackground(QColor("#FFF9C4"))
+                abstain_area_item.setForeground(QColor("black"))
+                
                 # 面積坪數百分比列（分母為出席住戶總坪數）
                 agree_area_pct_item = QTableWidgetItem(f"{agree_area_pct:.2f}%")
                 agree_area_pct_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -531,10 +555,26 @@ class VotingWindow(QWidget):
                 self.vote_stats_table.setItem(row_idx, 2, agree_item)
                 self.vote_stats_table.setItem(row_idx, 3, disagree_item)
                 self.vote_stats_table.setItem(row_idx, 4, abstain_item)
-                self.vote_stats_table.setItem(row_idx, 5, agree_area_pct_item)
-                self.vote_stats_table.setItem(row_idx, 6, disagree_area_pct_item)
-                self.vote_stats_table.setItem(row_idx, 7, abstain_area_pct_item)
-                self.vote_stats_table.setItem(row_idx, 8, progress_item)
+                self.vote_stats_table.setItem(row_idx, 5, agree_area_item)
+                self.vote_stats_table.setItem(row_idx, 6, disagree_area_item)
+                self.vote_stats_table.setItem(row_idx, 7, abstain_area_item)
+                self.vote_stats_table.setItem(row_idx, 8, agree_area_pct_item)
+                self.vote_stats_table.setItem(row_idx, 9, disagree_area_pct_item)
+                self.vote_stats_table.setItem(row_idx, 10, abstain_area_pct_item)
+                self.vote_stats_table.setItem(row_idx, 11, progress_item)
+            
+            # 更新面積統計標籤（顯示當前選定案件的坪數資訊）
+            if self.voting_items and self.current_case_idx < len(self.voting_items):
+                cur_case_number = self.voting_items[self.current_case_idx]['case_number']
+                cur_agree_area = self.db.get_voting_area_by_vote(cur_case_number, '同意')
+                cur_disagree_area = self.db.get_voting_area_by_vote(cur_case_number, '不同意')
+                cur_abstain_area = self.db.get_voting_area_by_vote(cur_case_number, '棄權')
+                total_voted_area = cur_agree_area + cur_disagree_area + cur_abstain_area
+            
+            area_pct = (total_voted_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
+            self.stats_total_area_label.setText(f"總坪數: {checked_in_total_area:.2f} 坪")
+            self.stats_voted_area_label.setText(f"已投票坪數: {total_voted_area:.2f} 坪")
+            self.stats_area_pct_label.setText(f"坪數占比: {area_pct:.2f}%")
             
             # 刷新已投票列表
             self.refresh_voted_list()
