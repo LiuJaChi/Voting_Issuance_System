@@ -314,9 +314,17 @@ class CheckInWindow(QWidget):
             autotext.set_fontsize(9)
         
         # 設置標題
-        title_font = FontProperties(fname=_chinese_font_path, size=11, weight='bold') if _chinese_font_path else chinese_font
-        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15,
-                     fontproperties=title_font)
+        if _chinese_font_path:
+            title_font = FontProperties(fname=_chinese_font_path, size=11, weight='bold')
+        elif chinese_font is not None:
+            title_font = FontProperties(family=chinese_font.get_family()[0], size=11, weight='bold')
+        else:
+            title_font = None
+
+        if title_font is not None:
+            ax.set_title('報到狀態分佈', pad=15, fontproperties=title_font)
+        else:
+            ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15)
         
         self.figure.tight_layout()
         self.canvas.draw()
