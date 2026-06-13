@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun 13 11:22:00 2026
+
+@author: USER
+"""
+
 """
 報到窗口 UI 類
 """
@@ -404,13 +411,13 @@ class CheckInWindow(QWidget):
         # 更新統計信息
         stats = self.db.get_check_in_stats()
         if stats:
-            total = stats.get('total_expected', 0)
+            total = stats.get('total_households', 0)
             checked_in = stats.get('checked_in', 0)
-            percentage = stats.get('percentage', 0)
+            percentage = stats.get('checked_in_percentage', 0)
             
             self.total_label.setText(f"預期出席: {total}")
             self.checked_label.setText(f"已報到: {checked_in}")
-            self.percentage_label.setText(f"出席率: {percentage}%")
+            self.percentage_label.setText(f"出席率: {percentage:.1f}%")
             
             # 更新進度條
             if total > 0:
@@ -427,7 +434,7 @@ class CheckInWindow(QWidget):
         if area_stats:
             total_area = area_stats.get('total_area', 0)
             checked_in_area = area_stats.get('checked_in_area', 0)
-            area_percentage = area_stats.get('area_percentage', 0)
+            area_percentage = area_stats.get('checked_in_area_percentage', 0)
             
             self.total_area_label.setText(f"總坪數: {total_area:.2f} 坪")
             self.checked_area_label.setText(f"已報到坪數: {checked_in_area:.2f} 坪")
