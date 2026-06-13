@@ -11,6 +11,7 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.font_manager import FontProperties
 import sqlite3
 
 from src.backend.database import Database
@@ -24,7 +25,6 @@ def setup_chinese_font():
         plt.rcParams['axes.unicode_minus'] = False
     except Exception as e:
         print(f"字體設置失敗: {e}")
-
 
 # 初始化中文字體
 setup_chinese_font()
@@ -239,7 +239,19 @@ class CheckInWindow(QWidget):
             text.set_fontsize(8)
             text.set_weight('bold')
         
-        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15)
+        # 設置標題並指定中文字體
+        try:
+            # 嘗試使用 SimHei 字體
+            chinese_font = FontProperties(fname="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+        except:
+            try:
+                # 如果不存在，嘗試系統預設中文字體
+                import matplotlib.pyplot as plt
+                chinese_font = FontProperties(family=plt.rcParams['font.sans-serif'][0])
+            except:
+                chinese_font = None
+        
+        ax.set_title('報到狀態分佈', fontsize=11, fontweight='bold', pad=15, fontproperties=chinese_font)
         
         self.figure.tight_layout()
         self.canvas.draw()
@@ -419,24 +431,11 @@ class CheckInWindow(QWidget):
     def clear_check_in_data(self):
         """清空報到數據"""
         reply = QMessageBox.question(
-            self,
-            "確認",
-            "確定要清空所有報到數據嗎？\n此操作無法撤銷。",
+            self, "確認", "確定要清空所有報到數據嗎？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
         if reply == QMessageBox.StandardButton.Yes:
-            conn = self.db.get_connection()
-            cursor = conn.cursor()
-            
-            try:
-                cursor.execute("DELETE FROM check_in_records")
-                conn.commit()
-                conn.close()
-                
-                self.last_checked_in_household_id = None
-                self.refresh_check_in_list()
-                QMessageBox.information(self, "成功", "報到數據已清空")
-            except sqlite3.Error as e:
-                conn.close()
-                QMessageBox.critical(self, "錯誤", f"清空失敗: {str(e)}")
+            self.db.clear_check_in_data()
+            self.last_checked_in_household_id = None
+            self.refresh_check_in_list()
+            QMessageBox.information(self, "成功", "報到數據已清空")
