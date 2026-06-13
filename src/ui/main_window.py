@@ -328,10 +328,14 @@ class MainWindow(QMainWindow):
 
     def export_all_data(self):
         """導出所有數據"""
-        if self.db.export_data():
-            QMessageBox.information(self, "成功", "數據已導出到 exports/data.json")
-        else:
-            QMessageBox.critical(self, "錯誤", "數據導出失敗")
+        try:
+            export_path = self.db.export_data()
+            if export_path:
+                QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {export_path}")
+            else:
+                QMessageBox.critical(self, "錯誤", "數據導出失敗")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"數據導出失敗: {str(e)}")
 
     def clear_all_data(self):
         """清空所有數據"""

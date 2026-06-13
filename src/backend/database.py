@@ -1,32 +1,24 @@
 """
-投票系統數據庫管理模塊
-
-使用 SQLite 存儲：
-- 住戶信息（household_id, name, share_amount）
-- 報到記錄（household_id, checked_in_at）
-- 投票項目（case_number, name, description, vote_type, pass_percentage）
-- 投票記錄（household_id, case_number, vote）
-- 條碼映射（household_id, barcode_data）
+SQLite 數據庫管理模塊
 """
-import sqlite3
 import json
-import os
-from html import escape
-from datetime import datetime
+import sqlite3
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-
-from openpyxl import Workbook, load_workbook
+from datetime import datetime
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from html import escape
 
 
 class Database:
@@ -157,12 +149,13 @@ class Database:
             conn.commit()
             conn.close()
             return True
-        except Exception:
+        except Exception as e:
+            print(f"刪除住戶失敗: {e}")
             conn.close()
             return False
 
     def get_household(self, household_id: str) -> Optional[Dict]:
-        """通過戶號獲取住戶"""
+        """獲取住戶信息"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM households WHERE household_id = ?", (household_id,))
@@ -175,102 +168,80 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM households ORDER BY household_id")
-        rows = cursor.fetchall()
+        households = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return households
 
     def import_households(self, households: List[Dict]) -> Tuple[int, int]:
-        """批量導入住戶，返回 (成功數, 失敗數)"""
-        success = 0
-        failed = 0
-        for h in households:
-            share_amount = h.get('share_amount', 0.0)
-            if self.add_household(h['household_id'], h['name'], share_amount):
-                success += 1
-            else:
-                failed += 1
-        return success, failed
-
-    # ─────────────────────────── 條碼映射管理 ───���───────────────────────
-
-    def add_barcode_mapping(self, household_id: str, barcode_data: str) -> bool:
-        """添加戶號-條碼映射"""
+        """批量導入住戶"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
-            cursor.execute("""
-                INSERT INTO barcode_mapping (household_id, barcode_data)
-                VALUES (?, ?)
-            """, (household_id, barcode_data))
-            conn.commit()
-            conn.close()
-            return True
-        except sqlite3.IntegrityError:
-            conn.close()
-            return False
+        success = 0
+        skipped = 0
+
+        for household in households:
+            try:
+                cursor.execute("""
+                    INSERT INTO households (household_id, name, share_amount)
+                    VALUES (?, ?, ?)
+                """, (household['household_id'], household['name'], household.get('share_amount', 0.0)))
+                success += 1
+            except sqlite3.IntegrityError:
+                skipped += 1
+
+        conn.commit()
+        conn.close()
+        return success, skipped
+
+    # ─────────────────────────── 條碼管理 ───────────────────────────
 
     def get_household_id_by_barcode(self, barcode_data: str) -> Optional[str]:
-        """通過條碼查詢戶號"""
+        """通過條碼獲取住戶ID"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT household_id FROM barcode_mapping WHERE barcode_data = ?
-        """, (barcode_data,))
+        cursor.execute("SELECT household_id FROM barcode_mapping WHERE barcode_data = ?", (barcode_data,))
         row = cursor.fetchone()
         conn.close()
-        return row['household_id'] if row else None
+        return row[0] if row else None
 
     def get_barcode_by_household_id(self, household_id: str) -> Optional[str]:
-        """通過戶號查詢條碼"""
+        """通過住戶ID獲取條碼"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT barcode_data FROM barcode_mapping WHERE household_id = ?
-        """, (household_id,))
+        cursor.execute("SELECT barcode_data FROM barcode_mapping WHERE household_id = ?", (household_id,))
         row = cursor.fetchone()
         conn.close()
-        return row['barcode_data'] if row else None
+        return row[0] if row else None
 
     def get_all_barcode_mappings(self) -> List[Dict]:
         """獲取所有條碼映射"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT household_id, barcode_data FROM barcode_mapping ORDER BY household_id
-        """)
-        rows = cursor.fetchall()
+        cursor.execute("SELECT * FROM barcode_mapping")
+        mappings = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return mappings
 
     def delete_barcode_mapping(self, household_id: str) -> bool:
         """刪除條碼映射"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception:
-            conn.close()
-            return False
+        cursor.execute("DELETE FROM barcode_mapping WHERE household_id = ?", (household_id,))
+        conn.commit()
+        conn.close()
+        return True
 
     # ─────────────────────────── 報到管理 ───────────────────────────
 
-    def check_in_household(self, household_id: str, device_id: str = None) -> bool:
-        """住戶報到 - 使用電腦當前系統時間"""
+    def add_check_in(self, household_id: str, device_id: str = None) -> bool:
+        """添加報到記錄"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            print(f"📝 報到時間: {current_time} (戶號: {household_id})")
-            
             cursor.execute("""
-                INSERT INTO check_in_records (household_id, checked_in_at, device_id)
-                VALUES (?, ?, ?)
-            """, (household_id, current_time, device_id))
+                INSERT INTO check_in_records (household_id, device_id)
+                VALUES (?, ?)
+            """, (household_id, device_id))
             conn.commit()
             conn.close()
             return True
@@ -283,54 +254,76 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) as count FROM households")
-        total = cursor.fetchone()['count']
+        cursor.execute("SELECT COUNT(*) FROM households")
+        total_households = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) as count FROM check_in_records")
-        checked_in = cursor.fetchone()['count']
+        cursor.execute("SELECT COUNT(*) FROM check_in_records")
+        checked_in = cursor.fetchone()[0]
 
         conn.close()
 
-        percentage = (checked_in / total * 100) if total > 0 else 0
         return {
-            'total_expected': total,
+            'total_households': total_households,
             'checked_in': checked_in,
-            'percentage': round(percentage, 2)
+            'not_checked_in': total_households - checked_in,
+            'checked_in_percentage': (checked_in / total_households * 100) if total_households > 0 else 0
         }
 
     def get_check_in_area_stats(self) -> Dict:
-        """獲取報到面積統計（包括坪數和占比）"""
+        """獲取報到面積統計"""
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # 計算總坪數
-        cursor.execute("SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households")
-        total_area = cursor.fetchone()['total_area']
+        # 總面積
+        cursor.execute("SELECT SUM(share_amount) FROM households")
+        total_area = cursor.fetchone()[0] or 0.0
 
-        # 計算已報到的坪數
+        # 已報到面積
         cursor.execute("""
-            SELECT COALESCE(SUM(h.share_amount), 0) as checked_in_area
+            SELECT SUM(h.share_amount)
             FROM households h
-            INNER JOIN check_in_records c ON h.household_id = c.household_id
+            LEFT JOIN check_in_records c ON h.household_id = c.household_id
+            WHERE c.household_id IS NOT NULL
         """)
-        checked_in_area = cursor.fetchone()['checked_in_area']
+        checked_in_area = cursor.fetchone()[0] or 0.0
 
         conn.close()
 
-        # 計算坪數占比百分比
-        area_percentage = (checked_in_area / total_area * 100) if total_area > 0 else 0
-        
         return {
             'total_area': total_area,
             'checked_in_area': checked_in_area,
-            'area_percentage': round(area_percentage, 2)
+            'not_checked_in_area': total_area - checked_in_area,
+            'checked_in_area_percentage': (checked_in_area / total_area * 100) if total_area > 0 else 0
         }
+
+    def is_checked_in(self, household_id: str) -> bool:
+        """檢查是否已報到"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM check_in_records WHERE household_id = ?", (household_id,))
+        result = cursor.fetchone() is not None
+        conn.close()
+        return result
+
+    def clear_check_in_data(self) -> bool:
+        """清空報到數據"""
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM check_in_records")
+            conn.commit()
+            conn.close()
+            print("✓ 報到數據已清空")
+            return True
+        except Exception as e:
+            print(f"✗ 清空報到數據失敗: {e}")
+            return False
 
     # ─────────────────────────── 投票項目管理 ───────────────────────────
 
-    def add_voting_item(self, case_number: str, name: str, description: str = None,
+    def add_voting_item(self, case_number: str, name: str, description: str = '',
                        vote_type: str = '一般議案', pass_percentage: float = 66.7) -> bool:
-        """新增投票項目"""
+        """添加投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -350,34 +343,26 @@ class Database:
         """更新投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("""
-                UPDATE voting_items SET name = ?, description = ?, vote_type = ?, pass_percentage = ?
-                WHERE case_number = ?
-            """, (name, description, vote_type, pass_percentage, case_number))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception as e:
-            conn.close()
-            print(f"更新投票項目失敗: {e}")
-            return False
+        cursor.execute("""
+            UPDATE voting_items
+            SET name = ?, description = ?, vote_type = ?, pass_percentage = ?
+            WHERE case_number = ?
+        """, (name, description, vote_type, pass_percentage, case_number))
+        conn.commit()
+        conn.close()
+        return True
 
     def delete_voting_item(self, case_number: str) -> bool:
         """刪除投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("DELETE FROM voting_items WHERE case_number = ?", (case_number,))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception:
-            conn.close()
-            return False
+        cursor.execute("DELETE FROM voting_items WHERE case_number = ?", (case_number,))
+        conn.commit()
+        conn.close()
+        return True
 
     def get_voting_item(self, case_number: str) -> Optional[Dict]:
-        """通過案號獲取投票項目"""
+        """獲取投票項目"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
@@ -390,15 +375,14 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM voting_items ORDER BY case_number")
-        rows = cursor.fetchall()
+        items = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return items
 
-    # ─────────────────────────── 投票管理 ───────────────────────────
+    # ─────────────────────────── 投票記錄管理 ───────────────────────────
 
-    def record_vote(self, household_id: str, case_number: str, vote: str,
-                    device_id: str = None) -> bool:
-        """記錄投票（戶號+案號為複合主鍵，每個戶號每個案號只能投票一次）"""
+    def add_vote(self, household_id: str, case_number: str, vote: str, device_id: str = None) -> bool:
+        """添加投票記錄"""
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
@@ -414,37 +398,29 @@ class Database:
             return False
 
     def update_vote(self, household_id: str, case_number: str, vote: str) -> bool:
-        """更新投票（修改已投票的選項）"""
+        """更新投票記錄"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("""
-                UPDATE votes SET vote = ? WHERE household_id = ? AND case_number = ?
-            """, (vote, household_id, case_number))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception:
-            conn.close()
-            return False
+        cursor.execute("""
+            UPDATE votes SET vote = ? WHERE household_id = ? AND case_number = ?
+        """, (vote, household_id, case_number))
+        conn.commit()
+        conn.close()
+        return True
 
     def delete_vote(self, household_id: str, case_number: str) -> bool:
         """刪除投票記錄"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("""
-                DELETE FROM votes WHERE household_id = ? AND case_number = ?
-            """, (household_id, case_number))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception:
-            conn.close()
-            return False
+        cursor.execute("""
+            DELETE FROM votes WHERE household_id = ? AND case_number = ?
+        """, (household_id, case_number))
+        conn.commit()
+        conn.close()
+        return True
 
     def get_vote(self, household_id: str, case_number: str) -> Optional[str]:
-        """查詢某住戶對某案號的投票選項"""
+        """獲取投票記錄"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
@@ -452,48 +428,43 @@ class Database:
         """, (household_id, case_number))
         row = cursor.fetchone()
         conn.close()
-        return row['vote'] if row else None
+        return row[0] if row else None
 
     def get_all_votes_for_case(self, case_number: str) -> List[Dict]:
-        """獲取某案號的所有投票記錄"""
+        """獲取某案件的所有投票"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM votes WHERE case_number = ? ORDER BY voted_at
+            SELECT * FROM votes WHERE case_number = ? ORDER BY household_id
         """, (case_number,))
-        rows = cursor.fetchall()
+        votes = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return votes
 
     def get_voting_data_with_details(self, case_number: str) -> List[Dict]:
-        """獲取某案號的完整投票數據（含戶號、選項、面積、時間）"""
+        """獲取投票數據（包含住戶詳情）"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT
-                v.household_id,
-                v.vote,
-                COALESCE(h.share_amount, 0) as share_amount,
-                v.voted_at
+            SELECT v.*, h.name, h.share_amount
             FROM votes v
             LEFT JOIN households h ON v.household_id = h.household_id
             WHERE v.case_number = ?
-            ORDER BY v.voted_at DESC, v.household_id ASC
         """, (case_number,))
-        rows = cursor.fetchall()
+        votes = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return votes
 
     def get_all_votes_for_household(self, household_id: str) -> List[Dict]:
-        """獲取某住戶的所有投票記錄"""
+        """獲取某住戶的所有投票"""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT * FROM votes WHERE household_id = ? ORDER BY voted_at
+            SELECT * FROM votes WHERE household_id = ? ORDER BY case_number
         """, (household_id,))
-        rows = cursor.fetchall()
+        votes = [dict(row) for row in cursor.fetchall()]
         conn.close()
-        return [dict(row) for row in rows]
+        return votes
 
     def has_voted(self, household_id: str, case_number: str) -> bool:
         """檢查是否已投票"""
@@ -502,675 +473,71 @@ class Database:
         cursor.execute("""
             SELECT 1 FROM votes WHERE household_id = ? AND case_number = ?
         """, (household_id, case_number))
-        row = cursor.fetchone()
+        result = cursor.fetchone() is not None
         conn.close()
-        return row is not None
-
-    def get_voting_results(self, case_number: str) -> Dict:
-        """獲取某案號的投票結果"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
-        item = cursor.fetchone()
-        if not item:
-            conn.close()
-            return {}
-
-        cursor.execute("""
-            SELECT vote, COUNT(*) as count
-            FROM votes
-            WHERE case_number = ?
-            GROUP BY vote
-        """, (case_number,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        result = {
-            'case_number': case_number,
-            'item_name': item['name'],
-            'votes': {}
-        }
-        total = 0
-        for row in rows:
-            result['votes'][row['vote']] = row['count']
-            total += row['count']
-
-        result['total'] = total
         return result
 
-    def get_voting_statistics(self, case_number: str) -> Dict:
-        """獲取某案號的完整投票統計（人數、面積、百分比）"""
+    def get_voting_results(self, case_number: str) -> Dict:
+        """獲取投票結果統計"""
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT name FROM voting_items WHERE case_number = ?", (case_number,))
-        item = cursor.fetchone()
-        if not item:
-            conn.close()
+        # 獲取投票項目
+        voting_item = self.get_voting_item(case_number)
+        if not voting_item:
             return {}
 
+        # 計算投票統計
         cursor.execute("""
-            SELECT
-                COUNT(*) as checked_in_count,
-                COALESCE(SUM(h.share_amount), 0) as checked_in_area
-            FROM check_in_records c
-            LEFT JOIN households h ON c.household_id = h.household_id
-        """)
-        checked_in_row = cursor.fetchone()
-
-        cursor.execute("""
-            SELECT
-                v.household_id,
-                v.vote,
-                COALESCE(h.share_amount, 0) as share_amount,
-                v.voted_at
+            SELECT vote, COUNT(*) as count, SUM(h.share_amount) as area
             FROM votes v
             LEFT JOIN households h ON v.household_id = h.household_id
             WHERE v.case_number = ?
-            ORDER BY v.voted_at DESC, v.household_id ASC
-        """, (case_number,))
-        vote_records = [dict(row) for row in cursor.fetchall()]
-        conn.close()
-
-        checked_in_count = checked_in_row['checked_in_count'] or 0
-        checked_in_area = float(checked_in_row['checked_in_area'] or 0)
-
-        option_stats = {
-            '同意': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0},
-            '不同意': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0},
-            '棄權': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0}
-        }
-
-        total_voted_area = 0.0
-        for record in vote_records:
-            vote_option = record['vote']
-            share_amount = float(record.get('share_amount') or 0)
-
-            if vote_option not in option_stats:
-                option_stats[vote_option] = {
-                    'count': 0,
-                    'area': 0.0,
-                    'count_percentage': 0.0,
-                    'area_percentage': 0.0
-                }
-
-            option_stats[vote_option]['count'] += 1
-            option_stats[vote_option]['area'] += share_amount
-            total_voted_area += share_amount
-
-        total_voted_households = len(vote_records)
-        for stats in option_stats.values():
-            stats['count_percentage'] = round(
-                (stats['count'] / checked_in_count * 100) if checked_in_count > 0 else 0,
-                2
-            )
-            stats['area_percentage'] = round(
-                (stats['area'] / checked_in_area * 100) if checked_in_area > 0 else 0,
-                2
-            )
-
-        return {
-            'case_number': case_number,
-            'item_name': item['name'],
-            'vote_records': vote_records,
-            'total_checked_in_households': checked_in_count,
-            'total_checked_in_area': checked_in_area,
-            'total_voted_households': total_voted_households,
-            'total_voted_area': total_voted_area,
-            'overall_count_percentage': round(
-                (total_voted_households / checked_in_count * 100) if checked_in_count > 0 else 0,
-                2
-            ),
-            'overall_area_percentage': round(
-                (total_voted_area / checked_in_area * 100) if checked_in_area > 0 else 0,
-                2
-            ),
-            'by_vote': option_stats
-        }
-
-    def get_voting_results_with_area(self, case_number: str) -> Dict:
-        """獲取某案號的投票結果並包含坪數統計"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        # 獲取投票項目信息
-        cursor.execute("SELECT * FROM voting_items WHERE case_number = ?", (case_number,))
-        item = cursor.fetchone()
-        if not item:
-            conn.close()
-            return {}
-
-        # 計算總坪數
-        cursor.execute("SELECT COALESCE(SUM(share_amount), 0) as total_area FROM households")
-        total_area = cursor.fetchone()['total_area']
-
-        # 計算各選項的票數和坪數
-        cursor.execute("""
-            SELECT vote, COUNT(*) as count, COALESCE(SUM(h.share_amount), 0) as area
-            FROM votes v
-            JOIN households h ON v.household_id = h.household_id
-            WHERE v.case_number = ?
-            GROUP BY v.vote
+            GROUP BY vote
         """, (case_number,))
 
-        rows = cursor.fetchall()
-
-        result = {
+        results = {
             'case_number': case_number,
-            'item_name': item['name'],
-            'total_area': total_area,
-            'votes': {},
-            'areas': {}
-        }
-        
-        total_votes = 0
-        total_voted_area = 0
-        
-        for row in rows:
-            vote_option = row['vote']
-            count = row['count']
-            area = row['area']
-            
-            result['votes'][vote_option] = count
-            result['areas'][vote_option] = area
-            
-            total_votes += count
-            total_voted_area += area
-
-        result['total_votes'] = total_votes
-        result['total_voted_area'] = total_voted_area
-
-        # 計算贊成票的坪數
-        result['agree_area'] = result['areas'].get('同意', 0)
-        result['agree_votes'] = result['votes'].get('同意', 0)
-
-        conn.close()
-        return result
-
-    def get_voting_area_by_vote(self, case_number: str, vote_option: str) -> float:
-        """獲取某案號某投票選項的坪數總和"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT COALESCE(SUM(h.share_amount), 0) as area
-            FROM votes v
-            JOIN households h ON v.household_id = h.household_id
-            WHERE v.case_number = ? AND v.vote = ?
-        """, (case_number, vote_option))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        return row['area'] if row else 0.0
-
-    def get_all_voting_results(self) -> List[Dict]:
-        """獲取所有投票項目的結果"""
-        items = self.get_all_voting_items()
-        return [self.get_voting_results(item['case_number']) for item in items]
-
-    # ─────────────────────────── 投票數據匯出/匯入 (XLSX 格式) ───────────────────────────
-
-    @staticmethod
-    def _fmt_timestamp(ts) -> str:
-        """將時間戳截取為 'YYYY-MM-DD HH:MM:SS' 格式字符串"""
-        return str(ts)[:19] if ts else ''
-
-    @staticmethod
-    def _get_header_style():
-        """獲取表頭樣式"""
-        return {
-            'font': Font(bold=True, color="FFFFFF", size=11),
-            'fill': PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid"),
-            'alignment': Alignment(horizontal="center", vertical="center", wrap_text=True),
+            'name': voting_item['name'],
+            'by_vote': {},
+            'total_count': 0,
+            'total_area': 0.0
         }
 
-    @staticmethod
-    def _get_border():
-        """獲取邊框樣式"""
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        return thin_border
+        for row in cursor.fetchall():
+            vote_type = row[0]
+            count = row[1]
+            area = row[2] or 0.0
+            results['by_vote'][vote_type] = {
+                'count': count,
+                'area': area,
+                'area_percentage': 0.0
+            }
+            results['total_count'] += count
+            results['total_area'] += area
 
-    @staticmethod
-    def _init_pdf_fonts() -> Tuple[str, str]:
-        """初始化 PDF 中文字體，返回（正常字體, 粗體字體）名稱"""
-        cid_font_name = "STSong-Light"
-        try:
-            if cid_font_name not in pdfmetrics.getRegisteredFontNames():
-                pdfmetrics.registerFont(UnicodeCIDFont(cid_font_name))
-            return cid_font_name, cid_font_name
-        except Exception:
-            pass
+        # 計算百分比
+        for vote_type in results['by_vote']:
+            if results['total_area'] > 0:
+                results['by_vote'][vote_type]['area_percentage'] = (
+                    results['by_vote'][vote_type]['area'] / results['total_area'] * 100
+                )
 
-        font_paths = [
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttf",
-            "C:\\Windows\\Fonts\\msyh.ttc",
-            "C:\\Windows\\Fonts\\msyh.ttf",
-            "C:\\Windows\\Fonts\\kaiu.ttf",
-        ]
-
-        for idx, font_path in enumerate(font_paths):
-            if not os.path.exists(font_path):
-                continue
-
-            font_name = f"VotingPdfFont{idx}"
-            if font_name not in pdfmetrics.getRegisteredFontNames():
-                pdfmetrics.registerFont(TTFont(font_name, font_path))
-            return font_name, font_name
-
-        return "Helvetica", "Helvetica-Bold"
-
-    @staticmethod
-    def _format_pdf_vote_cell(stats: Dict) -> str:
-        """格式化 PDF 表格中的投票統計欄位"""
-        return (
-            f"人數：{stats.get('count', 0)}<br/>"
-            f"坪數：{stats.get('area', 0.0):.2f}<br/>"
-            f"百分比：{stats.get('area_percentage', 0.0):.2f}%"
-        )
-
-    def export_voting_data(self, export_path: str = None) -> str:
-        """匯出所有投票數據為 XLSX 格式。
-
-        Args:
-            export_path: 導出文件路徑。如果為 None，自動生成帶時間戳的路徑。
-
-        Returns:
-            匯出的文件路徑字符串，失敗時返回空字符串。
-        """
-        if export_path is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            export_path = f"exports/votes_{timestamp}.xlsx"
-
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-
-            # 取得所有投票記錄，JOIN 投票項目以獲得 case_name
-            cursor.execute("""
-                SELECT v.household_id,
-                       v.case_number,
-                       vi.name AS case_name,
-                       v.vote,
-                       v.voted_at,
-                       h.share_amount
-                FROM votes v
-                LEFT JOIN voting_items vi ON v.case_number = vi.case_number
-                LEFT JOIN households h ON v.household_id = h.household_id
-                ORDER BY v.case_number, v.household_id
-            """)
-            votes = [dict(row) for row in cursor.fetchall()]
-
-            cursor.execute("SELECT * FROM voting_items ORDER BY case_number")
-            voting_items = [dict(row) for row in cursor.fetchall()]
-
-            conn.close()
-
-            # 創建工作簿
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "投票記錄"
-
-            # 設置列寬
-            ws.column_dimensions['A'].width = 12
-            ws.column_dimensions['B'].width = 12
-            ws.column_dimensions['C'].width = 20
-            ws.column_dimensions['D'].width = 10
-            ws.column_dimensions['E'].width = 20
-            ws.column_dimensions['F'].width = 12
-
-            # 添加表頭
-            headers = ['戶號', '案號', '項目名稱', '投票選項', '投票時間', '坪數']
-            for col_num, header in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_num)
-                cell.value = header
-                cell.font = self._get_header_style()['font']
-                cell.fill = self._get_header_style()['fill']
-                cell.alignment = self._get_header_style()['alignment']
-                cell.border = self._get_border()
-
-            # 添加數據行
-            for row_num, vote in enumerate(votes, 2):
-                ws.cell(row=row_num, column=1).value = vote['household_id']
-                ws.cell(row=row_num, column=2).value = vote['case_number']
-                ws.cell(row=row_num, column=3).value = vote.get('case_name', '')
-                ws.cell(row=row_num, column=4).value = vote['vote']
-                ws.cell(row=row_num, column=5).value = self._fmt_timestamp(vote['voted_at'])
-                ws.cell(row=row_num, column=6).value = vote.get('share_amount', 0)
-
-                # 應用邊框
-                for col in range(1, 7):
-                    ws.cell(row=row_num, column=col).border = self._get_border()
-                    ws.cell(row=row_num, column=col).alignment = Alignment(
-                        horizontal="center", vertical="center"
-                    )
-
-            # 凍結表頭
-            ws.freeze_panes = "A2"
-
-            # 創建投票項目摘要表
-            ws_summary = wb.create_sheet("投票項目")
-            ws_summary.column_dimensions['A'].width = 12
-            ws_summary.column_dimensions['B'].width = 20
-            ws_summary.column_dimensions['C'].width = 10
-            ws_summary.column_dimensions['D'].width = 10
-
-            summary_headers = ['案號', '項目名稱', '通過百分比', '投票類型']
-            for col_num, header in enumerate(summary_headers, 1):
-                cell = ws_summary.cell(row=1, column=col_num)
-                cell.value = header
-                cell.font = self._get_header_style()['font']
-                cell.fill = self._get_header_style()['fill']
-                cell.alignment = self._get_header_style()['alignment']
-                cell.border = self._get_border()
-
-            for row_num, item in enumerate(voting_items, 2):
-                ws_summary.cell(row=row_num, column=1).value = item['case_number']
-                ws_summary.cell(row=row_num, column=2).value = item['name']
-                ws_summary.cell(row=row_num, column=3).value = item['pass_percentage']
-                ws_summary.cell(row=row_num, column=4).value = item['vote_type']
-
-                for col in range(1, 5):
-                    ws_summary.cell(row=row_num, column=col).border = self._get_border()
-                    ws_summary.cell(row=row_num, column=col).alignment = Alignment(
-                        horizontal="center", vertical="center"
-                    )
-
-            ws_summary.freeze_panes = "A2"
-
-            # 創建導出目錄
-            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
-
-            # 保存工作簿
-            wb.save(export_path)
-
-            print(f"✓ 投票數據已匯出到: {export_path}（共 {len(votes)} 筆）")
-            return export_path
-        except Exception as e:
-            print(f"✗ 投票數據匯出失敗: {e}")
-            return ''
-
-    def export_voting_results_pdf(self, export_path: str = None) -> str:
-        """匯出所有案件的投票結果為 PDF"""
-        if export_path is None:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            export_path = f"exports/voting_results_{timestamp}.pdf"
-
-        try:
-            font_name, font_bold_name = self._init_pdf_fonts()
-            generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            voting_items = self.get_all_voting_items()
-
-            Path(export_path).parent.mkdir(parents=True, exist_ok=True)
-
-            doc = SimpleDocTemplate(
-                export_path,
-                pagesize=A4,
-                leftMargin=12 * mm,
-                rightMargin=12 * mm,
-                topMargin=34 * mm,
-                bottomMargin=16 * mm,
-            )
-
-            styles = getSampleStyleSheet()
-            centered_style = ParagraphStyle(
-                "VotingPdfCell",
-                parent=styles["BodyText"],
-                fontName=font_name,
-                fontSize=8.5,
-                leading=11,
-                alignment=TA_CENTER,
-            )
-            case_style = ParagraphStyle(
-                "VotingPdfCase",
-                parent=centered_style,
-                fontName=font_bold_name,
-            )
-
-            table_data = [[
-                Paragraph("案號", case_style),
-                Paragraph("項目名稱", case_style),
-                Paragraph("同意", case_style),
-                Paragraph("不同意", case_style),
-                Paragraph("棄權", case_style),
-            ]]
-
-            for item in voting_items:
-                stats = self.get_voting_statistics(item["case_number"])
-                by_vote = stats.get("by_vote", {})
-                table_data.append([
-                    Paragraph(escape(str(item["case_number"])), centered_style),
-                    Paragraph(escape(str(item["name"])), centered_style),
-                    Paragraph(self._format_pdf_vote_cell(by_vote.get("同意", {})), centered_style),
-                    Paragraph(self._format_pdf_vote_cell(by_vote.get("不同意", {})), centered_style),
-                    Paragraph(self._format_pdf_vote_cell(by_vote.get("棄權", {})), centered_style),
-                ])
-
-            table = Table(
-                table_data,
-                colWidths=[18 * mm, 45 * mm, 41 * mm, 41 * mm, 41 * mm],
-                repeatRows=1,
-            )
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), font_bold_name),
-                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-                ("LEADING", (0, 0), (-1, -1), 11),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#9E9E9E")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.HexColor("#F4F7FB")]),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]))
-
-            def draw_header_footer(canvas, _doc):
-                canvas.saveState()
-                canvas.setFont(font_bold_name, 14)
-                canvas.drawCentredString(A4[0] / 2, A4[1] - 18 * mm, "投票系統 - 投票結果統計")
-                canvas.setFont(font_name, 9)
-                canvas.drawCentredString(A4[0] / 2, A4[1] - 24 * mm, f"生成時間：{generated_at}")
-                canvas.setStrokeColor(colors.HexColor("#B0BEC5"))
-                canvas.line(_doc.leftMargin, A4[1] - 27 * mm, A4[0] - _doc.rightMargin, A4[1] - 27 * mm)
-                canvas.drawRightString(A4[0] - _doc.rightMargin, 10 * mm, f"第 {canvas.getPageNumber()} 頁")
-                canvas.restoreState()
-
-            elements = [Spacer(1, 2 * mm), table]
-            doc.build(elements, onFirstPage=draw_header_footer, onLaterPages=draw_header_footer)
-
-            print(f"✓ 投票結果 PDF 已匯出到: {export_path}（共 {len(voting_items)} 案）")
-            return export_path
-        except Exception as e:
-            print(f"✗ 投票結果 PDF 匯出失敗: {e}")
-            return ''
-
-    def validate_voting_data(self, data: List[Dict]) -> Tuple[List[Dict], List[str]]:
-        """驗證匯入的投票數據格式和內容。
-
-        Args:
-            data: 每筆記錄包含 household_id, case_number, vote 欄位的列表。
-
-        Returns:
-            (valid_rows, errors) — 通過驗證的列表和錯誤訊息列表。
-        """
-        valid_options = {'同意', '不同意', '棄權'}
-
-        # 預先獲取所有合法的 household_id 和 case_number
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT household_id FROM households")
-        existing_households = {row['household_id'] for row in cursor.fetchall()}
-        cursor.execute("SELECT case_number FROM voting_items")
-        existing_cases = {row['case_number'] for row in cursor.fetchall()}
         conn.close()
+        return results
 
-        valid_rows: List[Dict] = []
-        errors: List[str] = []
-
-        for idx, row in enumerate(data, start=1):
-            household_id = str(row.get('household_id', '')).strip()
-            case_number = str(row.get('case_number', '')).strip()
-            vote = str(row.get('vote', '')).strip()
-
-            if not household_id:
-                errors.append(f"第 {idx} 筆：household_id 為空")
-                continue
-            if not case_number:
-                errors.append(f"第 {idx} 筆（{household_id}）：case_number 為空")
-                continue
-            if vote not in valid_options:
-                errors.append(f"第 {idx} 筆（{household_id}/{case_number}）：無效投票選項「{vote}」")
-                continue
-            if household_id not in existing_households:
-                errors.append(f"第 {idx} 筆：戶號「{household_id}」不存在")
-                continue
-            if case_number not in existing_cases:
-                errors.append(f"第 {idx} 筆：案號「{case_number}」不存在")
-                continue
-
-            valid_rows.append({
-                'household_id': household_id,
-                'case_number': case_number,
-                'vote': vote,
-                'voted_at': str(row.get('voted_at', '')).strip() or None,
-            })
-
-        return valid_rows, errors
-
-    def import_voting_data(self, file_path: str, mode: str = 'merge') -> Dict:
-        """匯入投票數據 (XLSX 格式)。
-
-        Args:
-            file_path: XLSX 文件路徑。
-            mode: 'merge'（合併）或 'replace'（覆蓋）。
-
-        Returns:
-            包含 success, skipped, errors, messages 的字典。
-        """
-        result = {
-            'success': 0,
-            'skipped': 0,
-            'errors': [],
-            'messages': [],
-        }
-
-        try:
-            file_path = str(file_path)
-            ext = Path(file_path).suffix.lower()
-
-            # 檢查文件格式
-            if ext != '.xlsx':
-                result['errors'].append(f'不支持的文件格式：{ext}（僅支持 .xlsx）')
-                return result
-
-            # 讀取 XLSX 文件
-            wb = load_workbook(file_path)
-            ws = wb.active
-
-            raw_rows: List[Dict] = []
-            headers = None
-
-            # 讀取表頭和數據
-            for row_num, row in enumerate(ws.iter_rows(values_only=True), 1):
-                if row_num == 1:
-                    headers = row
-                    continue
-                
-                if not headers or not row[0]:  # 跳過空行
-                    continue
-
-                # 構建字典（忽略超出 headers 長度的列）
-                record = {}
-                for col_num, header in enumerate(headers):
-                    if col_num < len(row):
-                        record[header] = row[col_num]
-                    else:
-                        record[header] = None
-
-                raw_rows.append(record)
-
-            if not raw_rows:
-                result['messages'].append('文件中沒有數據記錄')
-                return result
-
-            # 驗證數據格式
-            valid_rows, errors = self.validate_voting_data(raw_rows)
-            result['errors'].extend(errors)
-
-            if not valid_rows:
-                result['messages'].append('沒有通過驗證的有效記錄')
-                return result
-
-            conn = self.get_connection()
-            cursor = conn.cursor()
-
-            # 覆蓋模式：清空所有投票記錄
-            if mode == 'replace':
-                cursor.execute("DELETE FROM votes")
-                conn.commit()
-                result['messages'].append('已清空現有投票記錄（覆蓋模式）')
-
-            # 記錄插入前的行數，用於計算實際成功數
-            cursor.execute("SELECT COUNT(*) FROM votes")
-            count_before = cursor.fetchone()[0]
-
-            # 使用 INSERT OR IGNORE 批量插入，重複記錄由資料庫自動跳過
-            rows_with_time = [
-                (r['household_id'], r['case_number'], r['vote'], r['voted_at'])
-                for r in valid_rows if r.get('voted_at')
-            ]
-            rows_no_time = [
-                (r['household_id'], r['case_number'], r['vote'])
-                for r in valid_rows if not r.get('voted_at')
-            ]
-
-            if rows_with_time:
-                cursor.executemany("""
-                    INSERT OR IGNORE INTO votes (household_id, case_number, vote, voted_at)
-                    VALUES (?, ?, ?, ?)
-                """, rows_with_time)
-
-            if rows_no_time:
-                cursor.executemany("""
-                    INSERT OR IGNORE INTO votes (household_id, case_number, vote)
-                    VALUES (?, ?, ?)
-                """, rows_no_time)
-
-            conn.commit()
-
-            cursor.execute("SELECT COUNT(*) FROM votes")
-            count_after = cursor.fetchone()[0]
-            conn.close()
-
-            result['success'] = count_after - count_before
-            result['skipped'] = len(valid_rows) - result['success']
-
-            result['messages'].append(
-                f"匯入完成：成功 {result['success']} 筆，"
-                f"跳過重複 {result['skipped']} 筆，"
-                f"驗證錯誤 {len(result['errors'])} 筆"
-            )
-            print(f"✓ 投票數據匯入完成: {result}")
-        except Exception as e:
-            result['errors'].append(f'匯入失敗：{e}')
-            print(f"✗ 投票數據匯入失敗: {e}")
-
-        return result
+    def get_voting_statistics(self, case_number: str) -> Dict:
+        """獲取投票統計"""
+        return self.get_voting_results(case_number)
 
     # ─────────────────────────── 數據導出 ───────────────────────────
 
-    def export_data(self, export_path: str = "exports/data.json") -> bool:
-        """導出所有數據到 JSON 文件"""
+    def export_data(self, export_path: str = None) -> bool:
+        """導出所有數據到 XLSX 文件"""
+        if export_path is None:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            export_path = f"exports/data_{timestamp}.xlsx"
+
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
@@ -1193,25 +560,64 @@ class Database:
 
             conn.close()
 
-            # 構建導出數據
-            export_data = {
-                'households': households,
-                'check_in_records': check_in_records,
-                'barcode_mappings': barcode_mappings,
-                'voting_items': voting_items,
-                'votes': votes,
-                'exported_at': datetime.now().isoformat()
-            }
+            # 創建工作簿
+            wb = Workbook()
+            ws_households = wb.active
+            ws_households.title = "住戶"
+
+            # 住戶工作表
+            ws_households.append(["戶號", "戶名", "面積(坪)", "創建時間"])
+            for h in households:
+                ws_households.append([
+                    h.get('household_id', ''),
+                    h.get('name', ''),
+                    h.get('share_amount', 0.0),
+                    h.get('created_at', '')
+                ])
+
+            # 報到記錄工作表
+            ws_check_in = wb.create_sheet("報到記錄")
+            ws_check_in.append(["戶號", "報到時間", "設備ID"])
+            for c in check_in_records:
+                ws_check_in.append([
+                    c.get('household_id', ''),
+                    c.get('checked_in_at', ''),
+                    c.get('device_id', '')
+                ])
+
+            # 投票項目工作表
+            ws_items = wb.create_sheet("投票項目")
+            ws_items.append(["案號", "項目名稱", "描述", "投票類型", "通過百分比", "創建時間"])
+            for item in voting_items:
+                ws_items.append([
+                    item.get('case_number', ''),
+                    item.get('name', ''),
+                    item.get('description', ''),
+                    item.get('vote_type', ''),
+                    item.get('pass_percentage', 0.0),
+                    item.get('created_at', '')
+                ])
+
+            # 投票記錄工作表
+            ws_votes = wb.create_sheet("投票記錄")
+            ws_votes.append(["戶號", "案號", "投票", "設備ID", "投票時間"])
+            for v in votes:
+                ws_votes.append([
+                    v.get('household_id', ''),
+                    v.get('case_number', ''),
+                    v.get('vote', ''),
+                    v.get('device_id', ''),
+                    v.get('voted_at', '')
+                ])
 
             # 創建導出目錄
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
 
-            # 寫入 JSON 文件
-            with open(export_path, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
+            # 保存工作簿
+            wb.save(export_path)
 
             print(f"✓ 數據已導出到: {export_path}")
-            return True
+            return export_path
         except Exception as e:
             print(f"✗ 數據導出失敗: {e}")
             return False
@@ -1246,7 +652,6 @@ class Database:
             conn = self.get_connection()
             cursor = conn.cursor()
 
-            # 只刪除與住戶相關的數據
             cursor.execute("DELETE FROM votes")
             cursor.execute("DELETE FROM check_in_records")
             cursor.execute("DELETE FROM barcode_mapping")
@@ -1260,17 +665,3 @@ class Database:
         except Exception as e:
             print(f"✗ 清空住戶數據失敗: {e}")
             return False
-
-    # ─────────────────────────── 向後兼容 ───────────────────────────
-
-    def add_voter(self, voter_id: str, barcode: str, name: str = None) -> bool:
-        """添加投票者（向後兼容，使用 household_id）"""
-        return self.add_household(voter_id, name or voter_id)
-
-    def get_voter(self, barcode: str) -> Optional[Dict]:
-        """通過條碼（戶號）獲取住戶"""
-        return self.get_household(barcode)
-
-    def get_all_voters(self) -> List[Dict]:
-        """獲取所有投票者（向後兼容）"""
-        return self.get_all_households()
