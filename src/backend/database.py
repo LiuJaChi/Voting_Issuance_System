@@ -748,7 +748,8 @@ class Database:
             'messages': []
         }
 
-        def normalize_time(value):
+        def validate_and_normalize_datetime(value):
+            """驗證報到時間格式並標準化為 YYYY-MM-DD HH:MM:SS。"""
             if isinstance(value, datetime):
                 return value.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -769,6 +770,7 @@ class Database:
                 raise ValueError("報到時間格式錯誤，應為 YYYY-MM-DD HH:MM:SS") from exc
 
         def find_column(field_names, keywords):
+            """依關鍵字尋找欄位索引，找不到時回傳 None。"""
             for idx, name in enumerate(field_names):
                 lowered = str(name or '').strip().lower()
                 if any(keyword in lowered for keyword in keywords):
@@ -800,7 +802,8 @@ class Database:
                     if not row:
                         continue
                     row_list = list(row)
-                    while len(row_list) <= max(household_col, share_col, checked_at_col):
+                    required_len = max(household_col, share_col, checked_at_col) + 1
+                    while len(row_list) < required_len:
                         row_list.append(None)
                     rows.append((row_idx, row_list[household_col], row_list[share_col], row_list[checked_at_col]))
 
@@ -864,14 +867,14 @@ class Database:
                     continue
 
                 try:
-                    float(share_value)
+                    float(share_text)
                 except (TypeError, ValueError):
                     result['failed_count'] += 1
                     result['errors'].append(f"第 {row_idx} 行: 面積(坪) '{share_value}' 不是有效數字")
                     continue
 
                 try:
-                    checked_in_at = normalize_time(checked_value)
+                    checked_in_at = validate_and_normalize_datetime(checked_value)
                 except ValueError as e:
                     result['failed_count'] += 1
                     result['errors'].append(f"第 {row_idx} 行: {str(e)}")
