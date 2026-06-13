@@ -19,14 +19,16 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from html import escape
+from src.backend.config_manager import ConfigManager
 
 
 class Database:
     """SQLite 數據庫管理類"""
 
-    def __init__(self, db_path: str = "data/votes.db"):
+    def __init__(self, db_path: str = "data/votes.db", config_manager: Optional[ConfigManager] = None):
         """初始化數據庫連接"""
         self.db_path = db_path
+        self.config_manager = config_manager or ConfigManager()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
@@ -254,8 +256,11 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM households")
-        total_households = cursor.fetchone()[0]
+        total_config = self.config_manager.get_config('total_participants', 0)
+        try:
+            total_expected = int(total_config)
+        except (TypeError, ValueError):
+            total_expected = 0
 
         cursor.execute("SELECT COUNT(*) FROM check_in_records")
         checked_in = cursor.fetchone()[0]
@@ -263,10 +268,10 @@ class Database:
         conn.close()
 
         return {
-            'total_households': total_households,
+            'expected_total': total_expected,
             'checked_in': checked_in,
-            'not_checked_in': total_households - checked_in,
-            'checked_in_percentage': (checked_in / total_households * 100) if total_households > 0 else 0
+            'not_checked_in': total_expected - checked_in,
+            'checked_in_percentage': (checked_in / total_expected * 100) if total_expected > 0 else 0
         }
 
     def get_check_in_area_stats(self) -> Dict:

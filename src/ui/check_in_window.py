@@ -404,9 +404,9 @@ class CheckInWindow(QWidget):
         # 更新統計信息
         stats = self.db.get_check_in_stats()
         if stats:
-            total = stats.get('total_expected', 0)
+            total = stats.get('expected_total', 0)
             checked_in = stats.get('checked_in', 0)
-            percentage = stats.get('percentage', 0)
+            percentage = stats.get('checked_in_percentage', 0)
             
             self.total_label.setText(f"預期出席: {total}")
             self.checked_label.setText(f"已報到: {checked_in}")
@@ -419,7 +419,7 @@ class CheckInWindow(QWidget):
                 self.progress_bar.setValue(0)
             
             # 更新圖表
-            not_checked_in = total - checked_in
+            not_checked_in = stats.get('not_checked_in', total - checked_in)
             self.create_pie_chart(checked_in, not_checked_in)
         
         # 計算面積統計
