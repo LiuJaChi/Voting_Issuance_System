@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QComboBox, 
     QLineEdit, QPushButton, QRadioButton, QButtonGroup, QTableWidget, 
-    QTableWidgetItem, QProgressBar, QMessageBox, QHeaderView, QScrollArea,
+    QTableWidgetItem, QProgressBar, QMessageBox, QHeaderView, QAbstractItemView,
     QDialog, QFileDialog, QTextEdit, QDialogButtonBox
 )
 from PyQt6.QtGui import QColor, QFont
@@ -28,6 +28,7 @@ class VotingWindow(QWidget):
         self.checked_in_households = {}  # 戶號 -> 報到記錄
         self.current_case_idx = 0
         self.selected_vote_option = None
+        self.current_vote_stats = {}
         
         self.init_ui()
     
@@ -161,6 +162,51 @@ class VotingWindow(QWidget):
         self.progress_bar.setValue(0)
         stats_layout.addWidget(self.progress_bar)
         
+        summary_group = QGroupBox("📌 統計摘要")
+        summary_layout = QVBoxLayout()
+
+        summary_overview_layout = QHBoxLayout()
+        self.summary_voter_label = QLabel("已投票: 0人/0人 (0.00%)")
+        self.summary_voter_label.setStyleSheet(
+            "background-color: #E3F2FD; color: #0D47A1; font-weight: bold; padding: 8px; border-radius: 4px;"
+        )
+        self.summary_voter_label.setWordWrap(True)
+        summary_overview_layout.addWidget(self.summary_voter_label)
+
+        self.summary_area_label = QLabel("已投票面積: 0.00坪/0.00坪 (0.00%)")
+        self.summary_area_label.setStyleSheet(
+            "background-color: #E8F5E9; color: #1B5E20; font-weight: bold; padding: 8px; border-radius: 4px;"
+        )
+        self.summary_area_label.setWordWrap(True)
+        summary_overview_layout.addWidget(self.summary_area_label)
+        summary_layout.addLayout(summary_overview_layout)
+
+        summary_option_layout = QHBoxLayout()
+        self.summary_agree_label = QLabel("同意: 0人 / 0.00坪")
+        self.summary_agree_label.setStyleSheet(
+            "background-color: #C8E6C9; color: black; font-weight: bold; padding: 8px; border-radius: 4px;"
+        )
+        self.summary_agree_label.setWordWrap(True)
+        summary_option_layout.addWidget(self.summary_agree_label)
+
+        self.summary_disagree_label = QLabel("不同意: 0人 / 0.00坪")
+        self.summary_disagree_label.setStyleSheet(
+            "background-color: #FFCDD2; color: black; font-weight: bold; padding: 8px; border-radius: 4px;"
+        )
+        self.summary_disagree_label.setWordWrap(True)
+        summary_option_layout.addWidget(self.summary_disagree_label)
+
+        self.summary_abstain_label = QLabel("棄權: 0人 / 0.00坪")
+        self.summary_abstain_label.setStyleSheet(
+            "background-color: #FFF9C4; color: black; font-weight: bold; padding: 8px; border-radius: 4px;"
+        )
+        self.summary_abstain_label.setWordWrap(True)
+        summary_option_layout.addWidget(self.summary_abstain_label)
+        summary_layout.addLayout(summary_option_layout)
+
+        summary_group.setLayout(summary_layout)
+        stats_layout.addWidget(summary_group)
+
         # 面積統計標籤列
         area_stats_row = QHBoxLayout()
         self.stats_total_area_label = QLabel("總坪數: 0.00 坪")
@@ -216,42 +262,22 @@ class VotingWindow(QWidget):
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
-        # ═══════════════════════════ 5. 已投票住戶列表 (橫向標籤) ═════════════════════════
+        # ═══════════════════════════ 5. 已投票住戶列表（表格） ═════════════════════════
         voted_group = QGroupBox("5️⃣ 已投票住戶列表")
         voted_layout = QVBoxLayout()
-        
-        # 建立可滾動區域
-        self.voted_scroll_area = QScrollArea()
-        self.voted_scroll_area.setWidgetResizable(True)
-        self.voted_scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 1px solid #DDD;
-                background-color: #F9F9F9;
-                border-radius: 4px;
-            }
-            QScrollBar:horizontal {
-                height: 8px;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: #2196F3;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background-color: #1976D2;
-            }
-        """)
-        
-        # 建立水平佈局容器
-        self.voted_container = QWidget()
-        self.voted_labels_layout = QHBoxLayout(self.voted_container)
-        self.voted_labels_layout.setContentsMargins(10, 10, 10, 10)
-        self.voted_labels_layout.setSpacing(8)
-        self.voted_labels_layout.addStretch()
-        
-        self.voted_scroll_area.setWidget(self.voted_container)
-        self.voted_scroll_area.setMaximumHeight(100)
-        
-        voted_layout.addWidget(self.voted_scroll_area)
+
+        self.voted_table = QTableWidget()
+        self.voted_table.setColumnCount(4)
+        self.voted_table.setHorizontalHeaderLabels(["戶號", "投票選項", "面積(坪)", "投票時間"])
+        self.voted_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.voted_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.voted_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.voted_table.verticalHeader().setVisible(False)
+        self.voted_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.voted_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.voted_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.voted_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        voted_layout.addWidget(self.voted_table)
         voted_group.setLayout(voted_layout)
         main_layout.addWidget(voted_group)
         
@@ -354,7 +380,6 @@ class VotingWindow(QWidget):
             
             # 刷新投票統計並更新進度條
             self.refresh_vote_stats()
-            self._update_progress_bar()
     
     def on_vote_option_selected(self, checked, option):
         """投票選項選中時的處理"""
@@ -441,56 +466,53 @@ class VotingWindow(QWidget):
     def get_checked_in_total_area(self):
         """獲取出席住戶的總坪數"""
         return sum(self.checked_in_households.values()) if self.checked_in_households else 0.0
+
+    def get_vote_statistics(self, case_number=None):
+        """獲取當前案件的完整投票統計"""
+        if case_number is None:
+            if not self.voting_items or self.current_case_idx >= len(self.voting_items):
+                return {}
+            case_number = self.voting_items[self.current_case_idx]['case_number']
+        return self.db.get_voting_statistics(case_number)
     
     def refresh_vote_stats(self):
-        """刷新投票統計 - 顯示坪數百分比（分母為出席住戶總坪數）"""
+        """刷新投票統計並同步更新摘要與已投票清單"""
         try:
             self.vote_stats_table.setRowCount(0)
+            self.current_vote_stats = {}
             
             if not self.voting_items:
+                self._update_progress_bar()
+                self.refresh_voted_list()
                 return
-            
-            # 獲取出席住戶的總坪數
-            checked_in_total_area = self.get_checked_in_total_area()
-            
-            total_households = len(self.checked_in_households)
-            
-            # 計算出席住戶總坪數並更新面積統計標籤
-            total_voted_area = 0.0
-            
+
             for row_idx, case in enumerate(self.voting_items):
                 self.vote_stats_table.insertRow(row_idx)
-                
-                case_number = case['case_number']
-                case_name = case['name']
-                
-                # 獲取投票結果
-                results = self.db.get_voting_results(case_number)
-                
-                agree_count = results.get('votes', {}).get('同意', 0)
-                disagree_count = results.get('votes', {}).get('不同意', 0)
-                abstain_count = results.get('votes', {}).get('棄權', 0)
-                
-                total_count = agree_count + disagree_count + abstain_count
-                
-                # 獲取各選項的面積(坪)數據
-                agree_area = self.db.get_voting_area_by_vote(case_number, '同意')
-                disagree_area = self.db.get_voting_area_by_vote(case_number, '不同意')
-                abstain_area = self.db.get_voting_area_by_vote(case_number, '棄權')
-                
-                # 計算坪數百分比 - 分母為出席住戶總坪數
-                agree_area_pct = (agree_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
-                disagree_area_pct = (disagree_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
-                abstain_area_pct = (abstain_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
-                
-                # 計算該案件的進度百分比（按人數）
-                case_progress = int((total_count / total_households) * 100) if total_households > 0 else 0
+                stats = self.get_vote_statistics(case['case_number'])
+                vote_stats = stats.get('by_vote', {})
+
+                agree_stats = vote_stats.get('同意', {})
+                disagree_stats = vote_stats.get('不同意', {})
+                abstain_stats = vote_stats.get('棄權', {})
+
+                agree_count = agree_stats.get('count', 0)
+                disagree_count = disagree_stats.get('count', 0)
+                abstain_count = abstain_stats.get('count', 0)
+
+                agree_area = agree_stats.get('area', 0.0)
+                disagree_area = disagree_stats.get('area', 0.0)
+                abstain_area = abstain_stats.get('area', 0.0)
+
+                agree_area_pct = agree_stats.get('area_percentage', 0.0)
+                disagree_area_pct = disagree_stats.get('area_percentage', 0.0)
+                abstain_area_pct = abstain_stats.get('area_percentage', 0.0)
+                case_progress = stats.get('overall_count_percentage', 0.0)
                 
                 # 填充表格
-                case_num_item = QTableWidgetItem(case_number)
+                case_num_item = QTableWidgetItem(case['case_number'])
                 case_num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 
-                case_name_item = QTableWidgetItem(case_name)
+                case_name_item = QTableWidgetItem(case['name'])
                 
                 agree_item = QTableWidgetItem(str(agree_count))
                 agree_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -540,7 +562,7 @@ class VotingWindow(QWidget):
                 abstain_area_pct_item.setForeground(QColor("black"))
                 
                 # 進度列
-                progress_item = QTableWidgetItem(f"{case_progress}%")
+                progress_item = QTableWidgetItem(f"{case_progress:.2f}%")
                 progress_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 progress_item.setForeground(QColor("black"))
                 if case_progress >= 75:
@@ -562,21 +584,49 @@ class VotingWindow(QWidget):
                 self.vote_stats_table.setItem(row_idx, 9, disagree_area_pct_item)
                 self.vote_stats_table.setItem(row_idx, 10, abstain_area_pct_item)
                 self.vote_stats_table.setItem(row_idx, 11, progress_item)
-            
-            # 更新面積統計標籤（顯示當前選定案件的坪數資訊）
-            if self.voting_items and self.current_case_idx < len(self.voting_items):
-                cur_case_number = self.voting_items[self.current_case_idx]['case_number']
-                cur_agree_area = self.db.get_voting_area_by_vote(cur_case_number, '同意')
-                cur_disagree_area = self.db.get_voting_area_by_vote(cur_case_number, '不同意')
-                cur_abstain_area = self.db.get_voting_area_by_vote(cur_case_number, '棄權')
-                total_voted_area = cur_agree_area + cur_disagree_area + cur_abstain_area
-            
-            area_pct = (total_voted_area / checked_in_total_area * 100) if checked_in_total_area > 0 else 0
+
+            self.current_vote_stats = self.get_vote_statistics()
+            current_vote_options = self.current_vote_stats.get('by_vote', {})
+            checked_in_total_area = self.current_vote_stats.get('total_checked_in_area', self.get_checked_in_total_area())
+            total_voted_area = self.current_vote_stats.get('total_voted_area', 0.0)
+
+            self.summary_voter_label.setText(
+                f"已投票: {self.current_vote_stats.get('total_voted_households', 0)}人/"
+                f"{self.current_vote_stats.get('total_checked_in_households', 0)}人 "
+                f"({self.current_vote_stats.get('overall_count_percentage', 0.0):.2f}%)"
+            )
+            self.summary_area_label.setText(
+                f"已投票面積: {total_voted_area:.2f}坪/"
+                f"{checked_in_total_area:.2f}坪 "
+                f"({self.current_vote_stats.get('overall_area_percentage', 0.0):.2f}%)"
+            )
+
+            self.summary_agree_label.setText(
+                f"同意: {current_vote_options.get('同意', {}).get('count', 0)}人 "
+                f"({current_vote_options.get('同意', {}).get('count_percentage', 0.0):.2f}%) / "
+                f"{current_vote_options.get('同意', {}).get('area', 0.0):.2f}坪 "
+                f"({current_vote_options.get('同意', {}).get('area_percentage', 0.0):.2f}%)"
+            )
+            self.summary_disagree_label.setText(
+                f"不同意: {current_vote_options.get('不同意', {}).get('count', 0)}人 "
+                f"({current_vote_options.get('不同意', {}).get('count_percentage', 0.0):.2f}%) / "
+                f"{current_vote_options.get('不同意', {}).get('area', 0.0):.2f}坪 "
+                f"({current_vote_options.get('不同意', {}).get('area_percentage', 0.0):.2f}%)"
+            )
+            self.summary_abstain_label.setText(
+                f"棄權: {current_vote_options.get('棄權', {}).get('count', 0)}人 "
+                f"({current_vote_options.get('棄權', {}).get('count_percentage', 0.0):.2f}%) / "
+                f"{current_vote_options.get('棄權', {}).get('area', 0.0):.2f}坪 "
+                f"({current_vote_options.get('棄權', {}).get('area_percentage', 0.0):.2f}%)"
+            )
+
             self.stats_total_area_label.setText(f"總坪數: {checked_in_total_area:.2f} 坪")
             self.stats_voted_area_label.setText(f"已投票坪數: {total_voted_area:.2f} 坪")
-            self.stats_area_pct_label.setText(f"坪數占比: {area_pct:.2f}%")
-            
-            # 刷新已投票列表
+            self.stats_area_pct_label.setText(
+                f"坪數占比: {self.current_vote_stats.get('overall_area_percentage', 0.0):.2f}%"
+            )
+
+            self._update_progress_bar()
             self.refresh_voted_list()
             
         except Exception as e:
@@ -585,93 +635,62 @@ class VotingWindow(QWidget):
     def _update_progress_bar(self):
         """更新進度條 - 顯示當前案件的進度"""
         try:
-            if not self.voting_items or self.current_case_idx >= len(self.voting_items):
+            stats = self.current_vote_stats or self.get_vote_statistics()
+            if not stats:
                 self.progress_bar.setValue(0)
                 self.progress_label.setText("投票進度: 0 / 0")
                 return
-            
-            case = self.voting_items[self.current_case_idx]
-            case_number = case['case_number']
-            
-            # 獲取該案件的投票結果
-            results = self.db.get_voting_results(case_number)
-            agree_count = results.get('votes', {}).get('同意', 0)
-            disagree_count = results.get('votes', {}).get('不同意', 0)
-            abstain_count = results.get('votes', {}).get('棄權', 0)
-            total_count = agree_count + disagree_count + abstain_count
-            
-            total_households = len(self.checked_in_households)
-            
-            # 更新進度
-            if total_households > 0:
-                progress = int((total_count / total_households) * 100)
-                self.progress_bar.setValue(progress)
-                self.progress_label.setText(f"投票進度: {total_count} / {total_households} ({progress}%)")
-            else:
-                self.progress_bar.setValue(0)
-                self.progress_label.setText("投票進度: 0 / 0")
+
+            total_count = stats.get('total_voted_households', 0)
+            total_households = stats.get('total_checked_in_households', 0)
+            progress = int(stats.get('overall_count_percentage', 0.0)) if total_households > 0 else 0
+            self.progress_bar.setValue(progress)
+            self.progress_label.setText(f"投票進度: {total_count} / {total_households} ({progress}%)")
                 
         except Exception as e:
             print(f"更新進度條失敗: {e}")
     
     def refresh_voted_list(self):
-        """刷新已投票住戶列表 - 僅顯示戶號，不顯示坪數"""
+        """刷新已投票住戶列表 - 表格顯示完整投票資訊"""
         try:
-            # 清空現有標籤
-            while self.voted_labels_layout.count() > 1:
-                item = self.voted_labels_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            
-            # 獲取當前案件已投票的住戶
+            self.voted_table.setRowCount(0)
+
             if not self.voting_items or self.current_case_idx >= len(self.voting_items):
                 return
             
             case = self.voting_items[self.current_case_idx]
-            case_number = case['case_number']
-            
-            # 獲取該案件的所有投票記錄
-            votes = self.db.get_all_votes_for_case(case_number)
-            
-            if not votes:
-                label = QLabel("暫無投票記錄")
-                label.setStyleSheet("color: #999; font-style: italic;")
-                self.voted_labels_layout.insertWidget(0, label)
-                return
-            
-            # 為每個投票的住戶創建標籤（僅顯示戶號）
-            for vote in votes:
-                household_id = vote['household_id']
-                vote_option = vote['vote']
-                
-                # 根據投票選項設置顏色
-                if vote_option == '同意':
-                    bg_color = "#4CAF50"
-                    text_color = "white"
-                elif vote_option == '不同意':
-                    bg_color = "#F44336"
-                    text_color = "white"
-                else:  # 棄權
-                    bg_color = "#FF9800"
-                    text_color = "white"
-                
-                # 創建標籤（僅顯示戶號）
-                label = QLabel(household_id)
-                label.setStyleSheet(f"""
-                    QLabel {{
-                        background-color: {bg_color};
-                        color: {text_color};
-                        padding: 6px 12px;
-                        border-radius: 4px;
-                        font-size: 10pt;
-                        font-weight: bold;
-                        text-align: center;
-                        min-width: 60px;
-                    }}
-                """)
-                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-                self.voted_labels_layout.insertWidget(0, label)
+            if self.current_vote_stats.get('case_number') == case['case_number']:
+                votes = self.current_vote_stats.get('vote_records', [])
+            else:
+                votes = self.db.get_voting_data_with_details(case['case_number'])
+
+            option_colors = {
+                '同意': QColor("#C8E6C9"),
+                '不同意': QColor("#FFCDD2"),
+                '棄權': QColor("#FFF9C4")
+            }
+
+            self.voted_table.setRowCount(len(votes))
+            for row_idx, vote in enumerate(votes):
+                household_item = QTableWidgetItem(vote['household_id'])
+                option_item = QTableWidgetItem(vote['vote'])
+                area_item = QTableWidgetItem(f"{float(vote.get('share_amount') or 0):.2f}")
+                time_item = QTableWidgetItem(str(vote.get('voted_at') or '')[:19])
+
+                household_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                option_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                area_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                bg_color = option_colors.get(vote['vote'], QColor("white"))
+                for item in (household_item, option_item, area_item, time_item):
+                    item.setBackground(bg_color)
+                    item.setForeground(QColor("black"))
+
+                self.voted_table.setItem(row_idx, 0, household_item)
+                self.voted_table.setItem(row_idx, 1, option_item)
+                self.voted_table.setItem(row_idx, 2, area_item)
+                self.voted_table.setItem(row_idx, 3, time_item)
             
         except Exception as e:
             print(f"刷新已投票列表失敗: {e}")
