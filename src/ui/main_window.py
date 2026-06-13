@@ -1,13 +1,15 @@
 """
 主窗口 UI 類
 """
+import os
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTabWidget, QMessageBox, QMenuBar, QMenu,
     QFileDialog, QInputDialog
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtGui import QIcon, QFont, QPixmap
 
 from src.backend.database import Database
 from src.backend.config_manager import ConfigManager
@@ -60,6 +62,9 @@ class MainWindow(QMainWindow):
 
         main_layout = QVBoxLayout()
 
+        # 標題列：左側放標題文字，右側放 LOGO
+        header_layout = QHBoxLayout()
+
         # 標題 - 從配置讀取系統名稱
         system_name = self.config_manager.get_config('system_name', '投票系統')
         self.title_label = QLabel(system_name)
@@ -67,8 +72,23 @@ class MainWindow(QMainWindow):
         title_font.setPointSize(16)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(self.title_label)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        header_layout.addWidget(self.title_label)
+
+        header_layout.addStretch()
+
+        # LOGO 圖片（右上角）
+        logo_label = QLabel()
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'assets', 'logo.png')
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            pixmap = pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+            logo_label.setFixedSize(100, 100)
+            logo_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(logo_label)
+
+        main_layout.addLayout(header_layout)
 
         tabs = QTabWidget()
 
