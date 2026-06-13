@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import sqlite3
 
 from src.backend.database import Database
+from src.backend.config_manager import ConfigManager
 
 # 模組級別儲存已偵測到的中文字體路徑
 _chinese_font_path = None
@@ -90,10 +91,16 @@ setup_chinese_font()
 class CheckInWindow(QWidget):
     """報到窗口 - 支持進度顯示、圖表統計和面積(坪)統計"""
     
-    def __init__(self, parent=None):
-        """初始化報到窗口"""
+    def __init__(self, parent=None, config_manager=None):
+        """初始化報到窗口
+        
+        Args:
+            parent: 父窗口
+            config_manager: 配置管理器實例
+        """
         super().__init__(parent)
-        self.db = Database()
+        self.config_manager = config_manager or ConfigManager()
+        self.db = Database(config_manager=self.config_manager)
         self.last_checked_in_household_id = None  # 記錄最後一筆報到的戶號
         
         self.init_ui()
@@ -393,7 +400,7 @@ class CheckInWindow(QWidget):
         # 更新統計信息
         stats = self.db.get_check_in_stats()
         if stats:
-            total = stats.get('total_households', 0)
+            total = stats.get('total_expected', 0)
             checked_in = stats.get('checked_in', 0)
             percentage = stats.get('checked_in_percentage', 0)
             
@@ -486,7 +493,7 @@ class CheckInWindow(QWidget):
     def export_check_in_data(self):
         """導出報到數據"""
         if self.db.export_data():
-            QMessageBox.information(self, "成功", "數據已導出到 exports/data.json")
+            QMessageBox.information(self, "成功", "數據已導出到 exports/data.xlsx")
         else:
             QMessageBox.critical(self, "錯誤", "數據導出失敗")
     
