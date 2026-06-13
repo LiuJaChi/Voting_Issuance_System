@@ -19,6 +19,7 @@ import sqlite3
 
 from src.backend.database import Database
 from src.backend.config_manager import ConfigManager
+from src.ui.import_check_in_dialog import ImportCheckInDialog
 
 # 模組級別儲存已偵測到的中文字體路徑
 _chinese_font_path = None
@@ -211,6 +212,10 @@ class CheckInWindow(QWidget):
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh_check_in_list)
         button_layout.addWidget(refresh_button)
+        
+        import_button = QPushButton("導入報到記錄")
+        import_button.clicked.connect(self.open_import_dialog)
+        button_layout.addWidget(import_button)
         
         export_button = QPushButton("導出報到記錄")
         export_button.clicked.connect(self.export_check_in_data)
@@ -496,6 +501,13 @@ class CheckInWindow(QWidget):
             QMessageBox.information(self, "成功", "數據已導出到 exports/data.xlsx")
         else:
             QMessageBox.critical(self, "錯誤", "數據導出失敗")
+
+    def open_import_dialog(self):
+        """打開報到記錄導入對話框"""
+        dialog = ImportCheckInDialog(self.db, self)
+        dialog.exec()
+        self.last_checked_in_household_id = None
+        self.refresh_check_in_list()
     
     def clear_check_in_data(self):
         """清空報到數據"""
