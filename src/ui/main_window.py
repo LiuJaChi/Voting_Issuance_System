@@ -78,8 +78,8 @@ class MainWindow(QMainWindow):
         self.voting_window = VotingWindow()
         tabs.addTab(self.voting_window, "投票")
 
-        self.results_window = ResultsWindow()
-        tabs.addTab(self.results_window, "結果統計")
+        #self.results_window = ResultsWindow()
+        #tabs.addTab(self.results_window, "結果統計")
 
         main_layout.addWidget(tabs)
         central_widget.setLayout(main_layout)
