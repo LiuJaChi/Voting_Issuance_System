@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from src.backend.config_manager import ConfigManager
-from src.backend.database import Database
 
 
 class SetupDialog(QDialog):
@@ -24,7 +23,6 @@ class SetupDialog(QDialog):
         self.setGeometry(100, 100, 500, 400)
         
         self.config_manager = ConfigManager()
-        self.db = Database()
         
         self.init_ui()
     
@@ -106,13 +104,6 @@ class SetupDialog(QDialog):
         
         try:
             if self.config_manager.save_config(config):
-                # 同時保存到數據庫
-                self.db.save_config(
-                    config['system_name'],
-                    config['total_participants'],
-                    config['pass_percentage']
-                )
-                
                 QMessageBox.information(self, "成功", "配置已保存")
                 
                 # 發出設置變更信號
