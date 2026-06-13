@@ -12,10 +12,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
+import platform
 
 
 class Database:
@@ -32,6 +33,60 @@ class Database:
         self.config_manager = config_manager
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
+        
+        # 初始化中文字體支持
+        self._setup_chinese_font()
+
+    def _setup_chinese_font(self):
+        """設置中文字體支持"""
+        try:
+            system = platform.system()
+            font_path = None
+            
+            # 根據系統選擇字體
+            if system == 'Windows':
+                # Windows 系統使用微軟雅黑或新細明體
+                possible_paths = [
+                    'C:\\Windows\\Fonts\\msyh.ttc',      # 微軟雅黑
+                    'C:\\Windows\\Fonts\\msjh.ttc',      # 微軟正黑
+                    'C:\\Windows\\Fonts\\SimSun.ttc',    # 宋體
+                ]
+                for path in possible_paths:
+                    if Path(path).exists():
+                        font_path = path
+                        break
+            elif system == 'Darwin':  # macOS
+                possible_paths = [
+                    '/Library/Fonts/Microsoft YaHei.ttf',
+                    '/System/Library/Fonts/STHeiti Light.ttc',
+                    '/System/Library/Fonts/PingFang.ttc',
+                ]
+                for path in possible_paths:
+                    if Path(path).exists():
+                        font_path = path
+                        break
+            else:  # Linux
+                possible_paths = [
+                    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+                    '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+                    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+                ]
+                for path in possible_paths:
+                    if Path(path).exists():
+                        font_path = path
+                        break
+            
+            # 如果找到字體，註冊到 ReportLab
+            if font_path:
+                pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+                self.chinese_font = 'ChineseFont'
+            else:
+                # 如果找不到字體，使用默認字體（不支持中文，但不會崩潰）
+                self.chinese_font = 'Helvetica'
+                print("⚠ 警告：找不到中文字體，PDF 中文可能無法顯示")
+        except Exception as e:
+            print(f"⚠ 字體設置失敗: {e}")
+            self.chinese_font = 'Helvetica'
 
     def get_connection(self):
         """獲取數據庫連接"""
@@ -253,38 +308,44 @@ class Database:
             return False
 
     def get_check_in_stats(self) -> Dict:
-        """獲取報到統計 - 使用系統配置的預期人數
-        
-        Returns:
-            包含以下鍵值的字典：
-            - total_expected: 預期出席人數（來自系統配置）
-            - checked_in: 已報到人數
-            - not_checked_in: 未報到人數
-            - checked_in_percentage: 出席百分比
         """
+        獲取報到統計
+        
+        使用配置中的「預期參與人數」而不是實際住戶數
+        返回字段：
+        - expected_total: 預期出席人數（來自配置）
+        - checked_in: 已報到人數
+        - not_checked_in: 未報到人數
+        - percentage: 報到百分比
+        - total_expected: 同 expected_total（向後相容）
+        """
+        if self.config_manager:
+            expected_total = self.config_manager.get_config('total_participants', 0)
+        else:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM households")
+            expected_total = cursor.fetchone()[0]
+            conn.close()
+        
         conn = self.get_connection()
         cursor = conn.cursor()
 
-        # 獲取預期人數（從配置管理器或數據庫中的住戶總數）
-        if self.config_manager:
-            total_expected = self.config_manager.get_config('total_participants', 0)
-        else:
-            # 如果沒有配置管理器，使用住戶總數作為備選
-            cursor.execute("SELECT COUNT(*) FROM households")
-            total_expected = cursor.fetchone()[0]
-
-        # 獲取已報到人數
         cursor.execute("SELECT COUNT(*) FROM check_in_records")
         checked_in = cursor.fetchone()[0]
 
         conn.close()
 
+        not_checked_in = expected_total - checked_in
+        percentage = (checked_in / expected_total * 100) if expected_total > 0 else 0
+
         return {
-            'total_expected': total_expected,
-            'total_households': total_expected,  # 向後相容性
+            'expected_total': expected_total,
+            'total_expected': expected_total,  # 向後相容
             'checked_in': checked_in,
-            'not_checked_in': total_expected - checked_in,
-            'checked_in_percentage': (checked_in / total_expected * 100) if total_expected > 0 else 0
+            'not_checked_in': not_checked_in,
+            'percentage': percentage,
+            'checked_in_percentage': percentage  # 向後相容
         }
 
     def get_check_in_area_stats(self) -> Dict:
@@ -775,10 +836,10 @@ class Database:
             return result
 
     def export_data(self, export_path: str = None) -> bool:
-        """導出所有數據到 XLSX 文件"""
+        """導出所有數據到 JSON 文件"""
         if export_path is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            export_path = f"exports/data_{timestamp}.xlsx"
+            export_path = f"exports/data_{timestamp}.json"
 
         try:
             conn = self.get_connection()
@@ -802,61 +863,24 @@ class Database:
 
             conn.close()
 
-            # 創建工作簿
-            wb = Workbook()
-            ws_households = wb.active
-            ws_households.title = "住戶"
-
-            # 住戶工作表
-            ws_households.append(["戶號", "戶名", "面積(坪)", "創建時間"])
-            for h in households:
-                ws_households.append([
-                    h.get('household_id', ''),
-                    h.get('name', ''),
-                    h.get('share_amount', 0.0),
-                    h.get('created_at', '')
-                ])
-
-            # 報到記錄工作表
-            ws_check_in = wb.create_sheet("報到記錄")
-            ws_check_in.append(["戶號", "報到時間", "設備ID"])
-            for c in check_in_records:
-                ws_check_in.append([
-                    c.get('household_id', ''),
-                    c.get('checked_in_at', ''),
-                    c.get('device_id', '')
-                ])
-
-            # 投票項目工作表
-            ws_items = wb.create_sheet("投票項目")
-            ws_items.append(["案號", "項目名稱", "描述", "投票類型", "通過百分比", "創建時間"])
-            for item in voting_items:
-                ws_items.append([
-                    item.get('case_number', ''),
-                    item.get('name', ''),
-                    item.get('description', ''),
-                    item.get('vote_type', ''),
-                    item.get('pass_percentage', 0.0),
-                    item.get('created_at', '')
-                ])
-
-            # 投票記錄工作表
-            ws_votes = wb.create_sheet("投票記錄")
-            ws_votes.append(["戶號", "案號", "投票", "設備ID", "投票時間"])
-            for v in votes:
-                ws_votes.append([
-                    v.get('household_id', ''),
-                    v.get('case_number', ''),
-                    v.get('vote', ''),
-                    v.get('device_id', ''),
-                    v.get('voted_at', '')
-                ])
+            # 構建導出數據
+            export_data = {
+                'config': {
+                    'export_time': datetime.now().isoformat()
+                },
+                'households': households,
+                'check_in_records': check_in_records,
+                'barcode_mappings': barcode_mappings,
+                'voting_items': voting_items,
+                'votes': votes
+            }
 
             # 創建導出目錄
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
 
-            # 保存工作簿
-            wb.save(export_path)
+            # 保存 JSON 文件
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2, default=str)
 
             print(f"✓ 數據已導出到: {export_path}")
             return True
@@ -865,7 +889,7 @@ class Database:
             return False
 
     def export_voting_results_pdf(self, export_path: str = None) -> str:
-        """匯出投票結果為 PDF
+        """匯出投票結果為 PDF（支持繁體中文）
         
         Args:
             export_path: 匯出路徑，如果不指定則自動生成
@@ -881,86 +905,139 @@ class Database:
             Path(export_path).parent.mkdir(parents=True, exist_ok=True)
 
             # 建立 PDF 文檔
-            doc = SimpleDocTemplate(export_path, pagesize=A4)
+            doc = SimpleDocTemplate(export_path, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm)
             story = []
 
-            # 標題
+            # 設置樣式
             styles = getSampleStyleSheet()
+            
+            # 標題樣式（使用中文字體）
             title_style = ParagraphStyle(
                 'CustomTitle',
                 parent=styles['Heading1'],
-                fontSize=18,
+                fontName=self.chinese_font,
+                fontSize=16,
                 textColor=colors.HexColor('#1976D2'),
                 spaceAfter=12,
                 alignment=TA_CENTER
             )
+            
+            # 項目標題樣式
+            item_title_style = ParagraphStyle(
+                'ItemTitle',
+                parent=styles['Heading2'],
+                fontName=self.chinese_font,
+                fontSize=12,
+                textColor=colors.HexColor('#333333'),
+                spaceAfter=6,
+                spaceBefore=12,
+                alignment=TA_LEFT
+            )
+            
+            # 時間戳樣式
+            timestamp_style = ParagraphStyle(
+                'Timestamp',
+                parent=styles['Normal'],
+                fontName=self.chinese_font,
+                fontSize=9,
+                textColor=colors.grey,
+                alignment=TA_CENTER,
+                spaceAfter=12
+            )
+            
+            # 表格文字樣式
+            normal_style = ParagraphStyle(
+                'Normal',
+                parent=styles['Normal'],
+                fontName=self.chinese_font,
+                fontSize=10
+            )
+
+            # 標題
             title = Paragraph("投票結果統計報告", title_style)
             story.append(title)
 
             # 時間戳
-            timestamp_style = ParagraphStyle(
-                'Timestamp',
-                parent=styles['Normal'],
-                fontSize=10,
-                textColor=colors.grey,
-                alignment=TA_CENTER
+            timestamp_para = Paragraph(
+                f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
+                timestamp_style
             )
-            timestamp_para = Paragraph(f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", timestamp_style)
             story.append(timestamp_para)
             story.append(Spacer(1, 12))
 
             # 獲取所有投票項目
             voting_items = self.get_all_voting_items()
 
-            for item in voting_items:
-                # 項目標題
-                item_title = Paragraph(f"案號: {item['case_number']} - {item['name']}", styles['Heading2'])
-                story.append(item_title)
+            if not voting_items:
+                story.append(Paragraph("沒有投票項目資料", normal_style))
+            else:
+                for item in voting_items:
+                    # 項目標題
+                    item_title = Paragraph(
+                        f"案號: {item['case_number']} - {item['name']}", 
+                        item_title_style
+                    )
+                    story.append(item_title)
 
-                # 獲取投票結果
-                stats = self.get_voting_statistics(item['case_number'])
-                
-                # 構建表格數據
-                table_data = [
-                    ['投票選項', '人數', '面積(坪)', '面積百分比']
-                ]
-
-                for vote_type in ['同意', '不同意', '棄權']:
-                    vote_stats = stats.get('by_vote', {}).get(vote_type, {})
-                    count = vote_stats.get('count', 0)
-                    area = vote_stats.get('area', 0.0)
-                    area_pct = vote_stats.get('area_percentage', 0.0)
+                    # 獲取投票結果
+                    stats = self.get_voting_statistics(item['case_number'])
                     
+                    if not stats:
+                        story.append(Paragraph("無投票數據", normal_style))
+                        story.append(Spacer(1, 8))
+                        continue
+                    
+                    # 構建表格數據
+                    table_data = [
+                        [
+                            Paragraph('投票選項', normal_style),
+                            Paragraph('人數', normal_style),
+                            Paragraph('面積(坪)', normal_style),
+                            Paragraph('面積百分比', normal_style)
+                        ]
+                    ]
+
+                    for vote_type in ['同意', '不同意', '棄權']:
+                        vote_stats = stats.get('by_vote', {}).get(vote_type, {})
+                        count = vote_stats.get('count', 0)
+                        area = vote_stats.get('area', 0.0)
+                        area_pct = vote_stats.get('area_percentage', 0.0)
+                        
+                        if count > 0 or area > 0:  # 只顯示有數據的行
+                            table_data.append([
+                                Paragraph(vote_type, normal_style),
+                                Paragraph(str(count), normal_style),
+                                Paragraph(f"{area:.2f}", normal_style),
+                                Paragraph(f"{area_pct:.2f}%", normal_style)
+                            ])
+
+                    # 總計行
                     table_data.append([
-                        vote_type,
-                        str(count),
-                        f"{area:.2f}",
-                        f"{area_pct:.2f}%"
+                        Paragraph('合計', normal_style),
+                        Paragraph(str(stats.get('total_voted_households', 0)), normal_style),
+                        Paragraph(f"{stats.get('total_voted_area', 0.0):.2f}", normal_style),
+                        Paragraph("100.00%", normal_style)
                     ])
 
-                # 總計行
-                table_data.append([
-                    '合計',
-                    str(stats.get('total_voted_households', 0)),
-                    f"{stats.get('total_voted_area', 0.0):.2f}",
-                    "100.00%"
-                ])
+                    # 建立表格
+                    table = Table(table_data, colWidths=[80, 60, 100, 100])
+                    table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('FONTNAME', (0, 0), (-1, 0), self.chinese_font),
+                        ('FONTSIZE', (0, 0), (-1, 0), 11),
+                        ('FONTNAME', (0, 1), (-1, -1), self.chinese_font),
+                        ('FONTSIZE', (0, 1), (-1, -1), 10),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                        ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.HexColor('#F5F5F5')])
+                    ]))
 
-                # 建立表格
-                table = Table(table_data)
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 12),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                ]))
-
-                story.append(table)
-                story.append(Spacer(1, 12))
+                    story.append(table)
+                    story.append(Spacer(1, 12))
 
             # 構建 PDF
             doc.build(story)
