@@ -454,6 +454,25 @@ class Database:
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_voting_data_with_details(self, case_number: str) -> List[Dict]:
+        """獲取某案號的完整投票數據（含戶號、選項、面積、時間）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                v.household_id,
+                v.vote,
+                COALESCE(h.share_amount, 0) as share_amount,
+                v.voted_at
+            FROM votes v
+            LEFT JOIN households h ON v.household_id = h.household_id
+            WHERE v.case_number = ?
+            ORDER BY v.voted_at DESC, v.household_id ASC
+        """, (case_number,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
     def get_all_votes_for_household(self, household_id: str) -> List[Dict]:
         """獲取某住戶的所有投票記錄"""
         conn = self.get_connection()
@@ -509,6 +528,96 @@ class Database:
 
         result['total'] = total
         return result
+
+    def get_voting_statistics(self, case_number: str) -> Dict:
+        """獲取某案號的完整投票統計（人數、面積、百分比）"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM voting_items WHERE case_number = ?", (case_number,))
+        item = cursor.fetchone()
+        if not item:
+            conn.close()
+            return {}
+
+        cursor.execute("""
+            SELECT
+                COUNT(*) as checked_in_count,
+                COALESCE(SUM(h.share_amount), 0) as checked_in_area
+            FROM check_in_records c
+            LEFT JOIN households h ON c.household_id = h.household_id
+        """)
+        checked_in_row = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT
+                v.household_id,
+                v.vote,
+                COALESCE(h.share_amount, 0) as share_amount,
+                v.voted_at
+            FROM votes v
+            LEFT JOIN households h ON v.household_id = h.household_id
+            WHERE v.case_number = ?
+            ORDER BY v.voted_at DESC, v.household_id ASC
+        """, (case_number,))
+        vote_records = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        checked_in_count = checked_in_row['checked_in_count'] or 0
+        checked_in_area = float(checked_in_row['checked_in_area'] or 0)
+
+        option_stats = {
+            '同意': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0},
+            '不同意': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0},
+            '棄權': {'count': 0, 'area': 0.0, 'count_percentage': 0.0, 'area_percentage': 0.0}
+        }
+
+        total_voted_area = 0.0
+        for record in vote_records:
+            vote_option = record['vote']
+            share_amount = float(record.get('share_amount') or 0)
+
+            if vote_option not in option_stats:
+                option_stats[vote_option] = {
+                    'count': 0,
+                    'area': 0.0,
+                    'count_percentage': 0.0,
+                    'area_percentage': 0.0
+                }
+
+            option_stats[vote_option]['count'] += 1
+            option_stats[vote_option]['area'] += share_amount
+            total_voted_area += share_amount
+
+        total_voted_households = len(vote_records)
+        for stats in option_stats.values():
+            stats['count_percentage'] = round(
+                (stats['count'] / checked_in_count * 100) if checked_in_count > 0 else 0,
+                2
+            )
+            stats['area_percentage'] = round(
+                (stats['area'] / checked_in_area * 100) if checked_in_area > 0 else 0,
+                2
+            )
+
+        return {
+            'case_number': case_number,
+            'item_name': item['name'],
+            'vote_records': vote_records,
+            'total_checked_in_households': checked_in_count,
+            'total_checked_in_area': checked_in_area,
+            'total_voted_households': total_voted_households,
+            'total_voted_area': total_voted_area,
+            'overall_count_percentage': round(
+                (total_voted_households / checked_in_count * 100) if checked_in_count > 0 else 0,
+                2
+            ),
+            'overall_area_percentage': round(
+                (total_voted_area / checked_in_area * 100) if checked_in_area > 0 else 0,
+                2
+            ),
+            'by_vote': option_stats
+        }
 
     def get_voting_results_with_area(self, case_number: str) -> Dict:
         """獲取某案號的投票結果並包含坪數統計"""
