@@ -1,373 +1,393 @@
 """
-投票系統 UI 主窗口
+投票系統 UI 主窗口（整合版）
+- 統一 key：meeting_pass_percentage / system_title_font_size
+- 新增：匯出投票結果報表 PDF
 """
-import os
+
 import traceback
+import shutil
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QTabWidget, QMessageBox, QMenuBar, QMenu,
-    QFileDialog, QInputDialog
+    QLabel, QTabWidget, QMessageBox, QFileDialog
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QIcon, QFont, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 from src.backend.database import Database
 from src.backend.config_manager import ConfigManager
 from src.backend.check_in_printer import CheckInPrinter
 from src.backend.voting_ballot_printer import VotingBallotPrinter
+from src.backend.voting_result_report_printer import VotingResultReportPrinter
 from src.backend.barcode_generator import BarcodeGenerator
 from src.ui.check_in_window import CheckInWindow
 from src.ui.voting_window import VotingWindow
-from src.ui.results_window import ResultsWindow
 from src.ui.setup_dialog import SetupDialog
 from src.ui.voting_item_dialog import VotingItemDialog
 from src.ui.household_manager_dialog import HouseholdManagerDialog
 
 
 class MainWindow(QMainWindow):
-    """主應用窗口"""
-    
-    # 設置變更信號
     settings_changed = pyqtSignal()
 
     def __init__(self):
-        """初始化主窗口"""
         super().__init__()
-        
-        self.db = Database()
+
         self.config_manager = ConfigManager()
-        
-        # 初始化窗口標題（從配置讀取）
-        self.update_window_title()
-        self.setGeometry(100, 100, 1200, 800)
-        
-        # 存儲標題標籤以便後續更新
+        self.db = Database(config_manager=self.config_manager)
+
         self.title_label = None
-        self.results_window = None  # 初始化 results_window 為 None
+        self.header_widget = None
+        self.tabs = None
+        self.results_window = None
+
+        self.logo_overlay = QLabel(self)
+        self.logo_overlay.setObjectName("LogoOverlay")
+        self.logo_overlay.setFixedSize(96, 96)
+        self.logo_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.logo_overlay.hide()
+
+        self.update_window_title()
+        self.setGeometry(100, 100, 1400, 900)
 
         self.init_ui()
+        self.apply_professional_theme()
+        self._load_logo()
+        self._position_logo_overlay()
+
+    def _cfg_get(self, key, default=None):
+        if hasattr(self.config_manager, "get_config"):
+            return self.config_manager.get_config(key, default)
+        if hasattr(self.config_manager, "get_setting"):
+            v = self.config_manager.get_setting(key, default)
+            return default if v is None else v
+        return default
+
+    def _to_int(self, value, default=0):
+        try:
+            return int(float(value))
+        except Exception:
+            return int(default)
 
     def update_window_title(self):
-        """從配置更新窗口標題"""
-        system_name = self.config_manager.get_config('system_name', '投票系統')
+        system_name = self._cfg_get("system_name", "投票系統")
         version = "v2.0.0"
         self.setWindowTitle(f"{system_name} {version}")
-        print(f"✓ 窗口標題已更新: {system_name} {version}")
 
     def init_ui(self):
-        """初始化用戶界面"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
         self.create_menu_bar()
 
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        # 標題列：置中放標題文字
-        header_layout = QHBoxLayout()
+        self.header_widget = QWidget()
+        self.header_widget.setObjectName("HeaderBar")
+        self.header_widget.setMinimumHeight(96)
+        self.header_widget.setMaximumHeight(96)
 
-        # 標題 - 從配置讀取系統名稱，置中顯示
-        header_layout.addStretch()
-        
-        system_name = self.config_manager.get_config('system_name', '投票系統')
-        self.title_label = QLabel(system_name)
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        self.title_label.setFont(title_font)
+        header_layout = QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(12, 0, 12, 0)
+
+        self.title_label = QLabel()
+        self.title_label.setObjectName("SystemTitle")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(self.title_label)
+        self.apply_system_title_style()
 
         header_layout.addStretch()
+        header_layout.addWidget(self.title_label)
+        header_layout.addStretch()
 
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(self.header_widget)
 
-        tabs = QTabWidget()
-
-        self.check_in_window = CheckInWindow()
-        tabs.addTab(self.check_in_window, "報到管理")
+        self.tabs = QTabWidget()
+        self.check_in_window = CheckInWindow(config_manager=self.config_manager)
+        self.tabs.addTab(self.check_in_window, "報到管理")
 
         self.voting_window = VotingWindow()
-        tabs.addTab(self.voting_window, "投票")
+        self.tabs.addTab(self.voting_window, "投票")
 
-        #self.results_window = ResultsWindow()
-        #tabs.addTab(self.results_window, "結果統計")
-
-        main_layout.addWidget(tabs)
+        main_layout.addWidget(self.tabs, 1)
         central_widget.setLayout(main_layout)
 
+    def apply_system_title_style(self):
+        if not self.title_label:
+            return
+        system_name = self._cfg_get("system_name", "投票系統")
+        title_size = self._to_int(self._cfg_get("system_title_font_size", 46), 46)
+        self.title_label.setText(system_name)
+        self.title_label.setStyleSheet(f"""
+            QLabel#SystemTitle {{
+                font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+                font-size: {title_size}px;
+                font-weight: 900;
+                letter-spacing: 2px;
+                color: #F5F7FA;
+                background: transparent;
+            }}
+        """)
+
+    def _load_logo(self):
+        candidates = [
+            Path("assets/custom_logo.png"),
+            Path("assets/logo_gold.png"),
+            Path("assets/logo.png"),
+        ]
+        logo_path = next((p for p in candidates if p.exists()), None)
+
+        if not logo_path:
+            self.logo_overlay.hide()
+            return
+
+        pix = QPixmap(str(logo_path))
+        if pix.isNull():
+            self.logo_overlay.hide()
+            return
+
+        self.logo_overlay.setPixmap(
+            pix.scaled(88, 88, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
+        self.logo_overlay.show()
+
+    def _position_logo_overlay(self):
+        margin_top = 28
+        margin_right = 20
+        x = self.width() - self.logo_overlay.width() - margin_right
+        y = margin_top
+        self.logo_overlay.move(max(0, x), max(0, y))
+        self.logo_overlay.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_logo_overlay()
+
+    def change_logo(self):
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "選擇 Logo 圖片", "",
+                "圖片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"
+            )
+            if not file_path:
+                return
+
+            assets_dir = Path("assets")
+            assets_dir.mkdir(parents=True, exist_ok=True)
+            dst = assets_dir / "custom_logo.png"
+            shutil.copyfile(Path(file_path), dst)
+
+            self._load_logo()
+            self._position_logo_overlay()
+            QMessageBox.information(self, "成功", f"Logo 已更新：{dst.as_posix()}")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"更換 Logo 失敗：{e}")
+
+    def apply_professional_theme(self):
+        self.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #1f2229;
+                color: #e8eaed;
+                font-family: "Microsoft JhengHei", "Noto Sans TC", "Segoe UI", sans-serif;
+                font-size: 13px;
+            }
+            #HeaderBar {
+                background-color: #1c212b;
+                border: 1px solid #313845;
+                border-radius: 8px;
+            }
+            #LogoOverlay { background-color: #1f2229; border: none; }
+        """)
+
     def create_menu_bar(self):
-        """創建菜單欄"""
         menubar = self.menuBar()
 
-        # 系統菜單
         system_menu = menubar.addMenu("系統")
-
-        setup_action = system_menu.addAction("系統設置")
-        setup_action.triggered.connect(self.open_setup_dialog)
-
+        system_menu.addAction("系統設置").triggered.connect(self.open_setup_dialog)
+        system_menu.addAction("更換 Logo").triggered.connect(self.change_logo)
         system_menu.addSeparator()
+        system_menu.addAction("退出").triggered.connect(self.close)
 
-        exit_action = system_menu.addAction("退出")
-        exit_action.triggered.connect(self.close)
-
-        # 住戶菜單
         household_menu = menubar.addMenu("住戶管理")
+        household_menu.addAction("管理住戶（戶號/姓名）").triggered.connect(self.manage_households)
 
-        manage_household_action = household_menu.addAction("管理住戶（戶號/姓名）")
-        manage_household_action.triggered.connect(self.manage_households)
-
-        # 投票菜單
         voting_menu = menubar.addMenu("投票")
+        voting_menu.addAction("管理投票案號").triggered.connect(self.open_voting_items_dialog)
 
-        items_action = voting_menu.addAction("管理投票案號")
-        items_action.triggered.connect(self.open_voting_items_dialog)
-
-        # 打印菜單
         print_menu = menubar.addMenu("列印")
-
-        check_in_print_action = print_menu.addAction("印報到單 PDF")
-        check_in_print_action.triggered.connect(self.print_check_in_ballots)
-
-        ballot_print_action = print_menu.addAction("印投票單 PDF")
-        ballot_print_action.triggered.connect(self.print_voting_ballots)
-
+        print_menu.addAction("印報到單 PDF").triggered.connect(self.print_check_in_ballots)
+        print_menu.addAction("印投票單 PDF").triggered.connect(self.print_voting_ballots)
+        print_menu.addAction("匯出投票結果報表 PDF").triggered.connect(self.export_voting_result_report_pdf)
         print_menu.addSeparator()
+        print_menu.addAction("生成條碼圖片").triggered.connect(self.generate_barcodes)
 
-        barcode_action = print_menu.addAction("生成條碼圖片")
-        barcode_action.triggered.connect(self.generate_barcodes)
-
-        # 數據菜單
         data_menu = menubar.addMenu("數據")
+        data_menu.addAction("導出數據").triggered.connect(self.export_all_data)
+        data_menu.addAction("導入數據").triggered.connect(self.open_import_dialog)
+        data_menu.addAction("清空數據").triggered.connect(self.clear_all_data)
 
-        export_action = data_menu.addAction("導出數據")
-        export_action.triggered.connect(self.export_all_data)
-
-        import_action = data_menu.addAction("導入數據")
-        import_action.triggered.connect(self.open_import_dialog)
-
-        clear_action = data_menu.addAction("清空數據")
-        clear_action.triggered.connect(self.clear_all_data)
+    def _refresh_all_views(self):
+        for obj, fn in [
+            (self.check_in_window, "refresh_check_in_list"),
+            (self.voting_window, "load_voting_items"),
+            (self.voting_window, "refresh_data"),
+            (self.results_window, "refresh_results"),
+        ]:
+            try:
+                if obj and hasattr(obj, fn):
+                    getattr(obj, fn)()
+            except Exception:
+                pass
 
     def open_setup_dialog(self):
-        """打開系統設置對話框"""
         dialog = SetupDialog(self)
-        
-        # 連接設置變更信號
         dialog.settings_changed.connect(self.on_settings_changed)
-        
         dialog.exec()
 
     def on_settings_changed(self):
-        """設置變更回調 - 更新窗口標題和內容"""
-        print("⚙️ 檢測到設置變更，正在更新窗口...")
-        
-        # 更新窗口標題
         self.update_window_title()
-        
-        # 更新標題標籤
-        if self.title_label:
-            system_name = self.config_manager.get_config('system_name', '投票系統')
-            self.title_label.setText(system_name)
-            print(f"✓ UI 標題已更新: {system_name}")
+        self.apply_system_title_style()
+        try:
+            if hasattr(self.check_in_window, "refresh_check_in_list"):
+                self.check_in_window.refresh_check_in_list()
+        except Exception:
+            pass
 
     def manage_households(self):
-        """管理住戶"""
         dialog = HouseholdManagerDialog(self)
         dialog.exec()
-        # 刷新報到窗口數據
-        self.check_in_window.refresh_check_in_list()
+        self._refresh_all_views()
 
     def open_voting_items_dialog(self):
-        """打開投票項目管理對話框"""
         dialog = VotingItemDialog(self)
         dialog.exec()
-        # 刷新投票窗口的投票項目
-        self.voting_window.load_voting_items()
+        self._refresh_all_views()
 
     def print_check_in_ballots(self):
-        """生成報到單 PDF"""
         try:
-            # 獲取所有住戶
             households = self.db.get_all_households()
-
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成報到單")
                 return
-
-            # 選擇輸出目錄
-            output_dir = QFileDialog.getExistingDirectory(
-                self,
-                "選擇輸出目錄",
-                "exports"
-            )
-
+            output_dir = QFileDialog.getExistingDirectory(self, "選擇輸出目錄", "exports")
             if not output_dir:
                 return
-
-            # 生成 PDF
-            printer = CheckInPrinter(output_dir=output_dir)
-            pdf_filename = printer.generate_check_in_ballots(households)
-
-            QMessageBox.information(
-                self, "成功",
-                f"報到單已生成完成！\n\n"
-                f"📄 PDF 報到單: {pdf_filename}\n"
-                f"住戶: {len(households)} 個\n"
-                f"總報到單: {len(households)} 張\n\n"
-                f"位置: {output_dir}"
-            )
+            pdf_filename = CheckInPrinter(output_dir=output_dir).generate_check_in_ballots(households)
+            QMessageBox.information(self, "成功", f"報到單已生成：{pdf_filename}")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {str(e)}")
-            import traceback
+            QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {e}")
             traceback.print_exc()
 
     def print_voting_ballots(self):
-        """生成投票單 PDF"""
         try:
-            # 獲取所有投票項目
             voting_data = self.db.get_all_voting_items()
             households = self.db.get_all_households()
-
             if not voting_data:
-                QMessageBox.warning(self, "警告", "沒有投票項目，無法生成投票單")
+                QMessageBox.warning(self, "警告", "沒有投票項目")
                 return
-
             if not households:
-                QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成投票單")
+                QMessageBox.warning(self, "警告", "沒有住戶數據")
                 return
 
-            # 選擇輸出目錄
-            output_dir = QFileDialog.getExistingDirectory(
-                self,
-                "選擇輸出目錄",
-                "exports"
-            )
+            pass_percentage = self._cfg_get("meeting_pass_percentage", None)
+            if pass_percentage is None:
+                pass_percentage = self._cfg_get("pass_percentage", 50.0)
+            pass_percentage = float(pass_percentage)
 
+            for case in voting_data:
+                case.setdefault("meeting_pass_percentage", pass_percentage)
+
+            output_dir = QFileDialog.getExistingDirectory(self, "選擇輸出目錄", "exports")
+            if not output_dir:
+                return
+            pdf_filename = VotingBallotPrinter(output_dir=output_dir).generate_pdf(voting_data)
+            QMessageBox.information(self, "成功", f"投票單已生成：{pdf_filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "錯誤", f"生成投票單失敗: {e}")
+            traceback.print_exc()
+
+    def export_voting_result_report_pdf(self):
+        try:
+            voting_data = self.db.get_all_voting_items()
+            if not voting_data:
+                QMessageBox.warning(self, "警告", "沒有投票項目")
+                return
+
+            pass_percentage = self._cfg_get("meeting_pass_percentage", None)
+            if pass_percentage is None:
+                pass_percentage = self._cfg_get("pass_percentage", 50.0)
+            pass_percentage = float(pass_percentage)
+
+            for case in voting_data:
+                case.setdefault("meeting_pass_percentage", pass_percentage)
+
+            output_dir = QFileDialog.getExistingDirectory(self, "選擇輸出目錄", "exports")
             if not output_dir:
                 return
 
-            # 生成 PDF
-            printer = VotingBallotPrinter(output_dir=output_dir)
-            pdf_filename = printer.generate_voting_ballots(voting_data, households)
-
-            total_ballots = len(voting_data) * len(households)
-
-            QMessageBox.information(
-                self, "成功",
-                f"投票單已生成完成！\n\n"
-                f"📄 PDF 投票單: {pdf_filename}\n"
-                f"投票案號: {len(voting_data)} 個\n"
-                f"住戶: {len(households)} 個\n"
-                f"總投票單: {total_ballots} 張\n\n"
-                f"位置: {output_dir}"
+            printer = VotingResultReportPrinter(output_dir=output_dir)
+            pdf_path = printer.generate_pdf(
+                voting_data=voting_data,
+                filename="voting_result_report.pdf",
+                default_pass_percentage=pass_percentage
             )
+            QMessageBox.information(self, "成功", f"投票結果報表已生成：\n{pdf_path}")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"生成投票單失敗: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            QMessageBox.critical(self, "錯誤", f"匯出投票結果報表失敗: {e}")
 
     def generate_barcodes(self):
-        """生成條碼圖片"""
         try:
-            # 從數據庫獲取所有住戶
             households = self.db.get_all_households()
-
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成條碼")
                 return
-
-            # 選擇輸出目錄
-            output_dir = QFileDialog.getExistingDirectory(
-                self,
-                "選擇條碼輸出目錄",
-                "exports/barcodes"
-            )
-
+            output_dir = QFileDialog.getExistingDirectory(self, "選擇條碼輸出目錄", "exports/barcodes")
             if not output_dir:
                 return
-
-            # 生成條碼 - 使用正確的方法
             generator = BarcodeGenerator(output_dir=output_dir)
-            
-            # 轉換為 (household_id, name) 元組列表
-            household_tuples = [(h['household_id'], h['name']) for h in households]
-            
-            # 生成住戶報到條碼
-            generator.generate_household_barcodes_batch(household_tuples, show_text=True)
-
-            QMessageBox.information(
-                self, "成功",
-                f"條碼圖片已生成\n位置: {output_dir}\n共 {len(households)} 個條碼"
-            )
+            generator.generate_household_barcodes_batch([(h["household_id"], h["name"]) for h in households], show_text=True)
+            QMessageBox.information(self, "成功", f"條碼圖片已生成\n位置: {output_dir}")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"生成條碼失敗: {str(e)}")
+            QMessageBox.critical(self, "錯誤", f"生成條碼失敗: {e}")
 
     def export_all_data(self):
-        """導出所有數據"""
         try:
-            file_path, selected_filter = QFileDialog.getSaveFileName(
-                self,
-                "導出數據",
-                "exports/data.json",
-                "JSON 文件 (*.json);;Excel 文件 (*.xlsx)"
-            )
-
+            file_path, _ = QFileDialog.getSaveFileName(self, "導出完整資料包", "exports/full_data.xlsx", "Excel 文件 (*.xlsx)")
             if not file_path:
                 return
-
-            if selected_filter == "Excel 文件 (*.xlsx)" or file_path.endswith('.xlsx'):
-                export_path = self.db.export_voting_data(file_path)
-                if export_path:
-                    QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {export_path}")
-                else:
-                    QMessageBox.critical(self, "錯誤", "數據導出失敗")
+            if not file_path.lower().endswith(".xlsx"):
+                file_path += ".xlsx"
+            export_path = self.db.export_data(file_path)
+            if export_path:
+                QMessageBox.information(self, "成功", f"完整資料包已導出：\n{export_path}")
             else:
-                if not file_path.endswith('.json'):
-                    file_path += '.json'
-                success = self.db.export_data(file_path)
-                if success:
-                    QMessageBox.information(self, "成功", f"📊 數據已導出\n\n位置: {file_path}")
-                else:
-                    QMessageBox.critical(self, "錯誤", "數據導出失敗")
+                QMessageBox.critical(self, "錯誤", "完整資料包導出失敗")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"數據導出失敗: {str(e)}\n\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "錯誤", f"數據導出失敗: {e}\n\n{traceback.format_exc()}")
 
     def open_import_dialog(self):
-        """打開導入數據對話框"""
         try:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "導入數據",
-                "",
-                "JSON 文件 (*.json)"
-            )
-
+            file_path, _ = QFileDialog.getOpenFileName(self, "導入數據（Excel）", "", "Excel 文件 (*.xlsx)")
             if not file_path:
                 return
-
-            success = self.db.import_json_data(file_path)
-            if success:
-                self.check_in_window.refresh_check_in_list()
-                self.voting_window.load_voting_items()
+            ok = self.db.import_excel_data(file_path)
+            if ok:
+                self._refresh_all_views()
                 QMessageBox.information(self, "成功", f"📥 數據已導入\n\n來源: {file_path}")
             else:
                 QMessageBox.critical(self, "錯誤", "數據導入失敗")
         except Exception as e:
-            QMessageBox.critical(self, "錯誤", f"數據導入失敗: {str(e)}\n\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "錯誤", f"數據導入失敗: {e}\n\n{traceback.format_exc()}")
 
     def clear_all_data(self):
-        """清空所有數據"""
         reply = QMessageBox.question(
             self, "確認", "確定要清空所有數據嗎？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.db.clear_all_data()
-            self.check_in_window.refresh_check_in_list()
-            self.voting_window.load_voting_items()
-            # 只有在 results_window 存在時才刷新
-            if self.results_window is not None:
-                self.results_window.refresh_results()
-            QMessageBox.information(self, "成功", "數據已清空")
+            ok = self.db.clear_all_data()
+            self._refresh_all_views()
+            QMessageBox.information(self, "成功", "數據已清空" if ok else "清空數據失敗")
