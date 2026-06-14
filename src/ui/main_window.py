@@ -2,6 +2,7 @@
 投票系統 UI 主窗口（整合版）
 - 統一 key：meeting_pass_percentage / system_title_font_size
 - 新增：匯出投票結果報表 PDF
+- 修正：報到單/投票單列印方法名稱相容（避免 method not found）
 """
 
 import traceback
@@ -272,10 +273,21 @@ class MainWindow(QMainWindow):
             if not households:
                 QMessageBox.warning(self, "警告", "沒有住戶數據，無法生成報到單")
                 return
+
             output_dir = QFileDialog.getExistingDirectory(self, "選擇輸出目錄", "exports")
             if not output_dir:
                 return
-            pdf_filename = CheckInPrinter(output_dir=output_dir).generate_check_in_ballots(households)
+
+            printer = CheckInPrinter(output_dir=output_dir)
+
+            if hasattr(printer, "generate_check_in_ballots"):
+                pdf_filename = printer.generate_check_in_ballots(households)
+            elif hasattr(printer, "generate_pdf"):
+                pdf_filename = printer.generate_pdf(households)
+            else:
+                methods = [m for m in dir(printer) if callable(getattr(printer, m)) and not m.startswith("_")]
+                raise AttributeError(f"CheckInPrinter 無可用匯出方法，可用方法: {methods}")
+
             QMessageBox.information(self, "成功", f"報到單已生成：{pdf_filename}")
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成報到單失敗: {e}")
@@ -297,13 +309,36 @@ class MainWindow(QMainWindow):
                 pass_percentage = self._cfg_get("pass_percentage", 50.0)
             pass_percentage = float(pass_percentage)
 
+            normalized_households = [
+                {
+                    "household_id": str(h.get("household_id", "")),
+                    "name": str(h.get("name", "")),
+                }
+                for h in households if str(h.get("household_id", "")).strip()
+            ]
+
             for case in voting_data:
                 case.setdefault("meeting_pass_percentage", pass_percentage)
+                if not case.get("households"):
+                    case["households"] = normalized_households
 
             output_dir = QFileDialog.getExistingDirectory(self, "選擇輸出目錄", "exports")
             if not output_dir:
                 return
-            pdf_filename = VotingBallotPrinter(output_dir=output_dir).generate_pdf(voting_data)
+
+            printer = VotingBallotPrinter(output_dir=output_dir)
+
+            if hasattr(printer, "generate_voting_ballots"):
+                pdf_filename = printer.generate_voting_ballots(voting_data, households)
+            elif hasattr(printer, "generate_pdf"):
+                pdf_filename = printer.generate_pdf(voting_data)
+            else:
+                methods = [m for m in dir(printer) if callable(getattr(printer, m)) and not m.startswith("_")]
+                raise AttributeError(f"VotingBallotPrinter 無可用匯出方法，可用方法: {methods}")
+
+            if not pdf_filename or not Path(pdf_filename).exists():
+                raise FileNotFoundError(f"投票單未產生檔案，回傳路徑: {pdf_filename}")
+
             QMessageBox.information(self, "成功", f"投票單已生成：{pdf_filename}")
         except Exception as e:
             QMessageBox.critical(self, "錯誤", f"生成投票單失敗: {e}")
