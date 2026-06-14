@@ -57,46 +57,119 @@ class VotingWindow(QWidget):
         load_group.setLayout(load_layout)
         main_layout.addWidget(load_group)
         
-        # ═══════════════════════════ 2. 選擇投票項目與投票選項 ═════════════════════════
+        # ═══════════════════════════ 2. 選擇投票項目與投票選項 ══════════════════════════
         vote_setup_group = QGroupBox("2️⃣ 選擇投票項目與投票選項")
         vote_setup_layout = QVBoxLayout()
         
-        # 投票項目選擇
+        # 投票項目選擇 - 加大尺寸和字體
         item_layout = QHBoxLayout()
-        item_layout.addWidget(QLabel("投票項目:"))
+        item_label = QLabel("投票項目:")
+        item_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+        item_layout.addWidget(item_label)
+        
         self.case_combo = QComboBox()
         self.case_combo.currentIndexChanged.connect(self.on_case_changed)
+        
+        # 設置 ComboBox 的樣式 - 加大尺寸
+        self.case_combo.setMinimumHeight(45)
+        self.case_combo.setMinimumWidth(400)
+        
+        # 設置字體
+        combo_font = QFont()
+        combo_font.setPointSize(11)
+        combo_font.setBold(True)
+        self.case_combo.setFont(combo_font)
+        
+        # 設置 ComboBox 樣式表
+        self.case_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #2196F3;
+                border-radius: 4px;
+                background-color: white;
+                font-size: 11pt;
+                font-weight: bold;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 30px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
+        """)
+        
         item_layout.addWidget(self.case_combo)
         item_layout.addStretch()
         vote_setup_layout.addLayout(item_layout)
         
         # 項目詳情顯示
         self.case_info_label = QLabel("請先載入住戶資料並選擇投票項目")
-        self.case_info_label.setStyleSheet("color: #FFF; font-size: 9pt;")
+        self.case_info_label.setStyleSheet("""
+            color: #666; 
+            font-size: 10pt;
+            background-color: #F5F5F5;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 4px solid #2196F3;
+        """)
         vote_setup_layout.addWidget(self.case_info_label)
         
         vote_setup_layout.addSpacing(10)
         
         # 投票選項選擇
         option_layout = QHBoxLayout()
-        option_layout.addWidget(QLabel("投票選項:"))
+        option_label = QLabel("投票選項:")
+        option_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+        option_layout.addWidget(option_label)
         
         self.vote_button_group = QButtonGroup()
         
         agree_radio = QRadioButton("✓ 同意")
-        agree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: white; }")
+        agree_radio.setStyleSheet("""
+            QRadioButton { 
+                font-size: 12pt; 
+                color: white;
+                font-weight: bold;
+            }
+            QRadioButton::indicator {
+                width: 20px;
+                height: 20px;
+            }
+        """)
         self.vote_button_group.addButton(agree_radio, 0)
         agree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "同意"))
         option_layout.addWidget(agree_radio)
         
         disagree_radio = QRadioButton("✗ 不同意")
-        disagree_radio.setStyleSheet("QRadioButton { font-size: 11pt; color:white; }")
+        disagree_radio.setStyleSheet("""
+            QRadioButton { 
+                font-size: 12pt; 
+                color: white;
+                font-weight: bold;
+            }
+            QRadioButton::indicator {
+                width: 20px;
+                height: 20px;
+            }
+        """)
         self.vote_button_group.addButton(disagree_radio, 1)
         disagree_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "不同意"))
         option_layout.addWidget(disagree_radio)
         
         abstain_radio = QRadioButton("⊘ 棄權")
-        abstain_radio.setStyleSheet("QRadioButton { font-size: 11pt; color: white; }")
+        abstain_radio.setStyleSheet("""
+            QRadioButton { 
+                font-size: 12pt; 
+                color: white;
+                font-weight: bold;
+            }
+            QRadioButton::indicator {
+                width: 20px;
+                height: 20px;
+            }
+        """)
         self.vote_button_group.addButton(abstain_radio, 2)
         abstain_radio.toggled.connect(lambda checked: self.on_vote_option_selected(checked, "棄權"))
         option_layout.addWidget(abstain_radio)
@@ -108,7 +181,7 @@ class VotingWindow(QWidget):
         
         # 投票選項狀態提示
         self.vote_status_label = QLabel("⚠ 請先選擇投票選項")
-        self.vote_status_label.setStyleSheet("color: #FF9800; font-weight: bold; font-size: 10pt;")
+        self.vote_status_label.setStyleSheet("color: #FF9800; font-weight: bold; font-size: 11pt;")
         vote_setup_layout.addWidget(self.vote_status_label)
         
         vote_setup_group.setLayout(vote_setup_layout)
@@ -267,7 +340,7 @@ class VotingWindow(QWidget):
         stats_group.setLayout(stats_layout)
         main_layout.addWidget(stats_group)
         
-        # ═══════════════════════════ 5. 已投票住戶列表 (水平卷軸標籤) ═════════════════════════
+        # ═══════════════════════════ 5. 已投票住戶列表 (水平卷軸標籤) ═══════════════════════════
         voted_group = QGroupBox("5️⃣ 已投票住戶列表")
         voted_layout = QVBoxLayout()
         
@@ -397,7 +470,7 @@ class VotingWindow(QWidget):
                 button.setChecked(False)
             self.selected_vote_option = None
             self.vote_status_label.setText("⚠ 請選擇投票選項")
-            self.vote_status_label.setStyleSheet("color: #FF9800; font-weight: bold; font-size: 10pt;")
+            self.vote_status_label.setStyleSheet("color: #FF9800; font-weight: bold; font-size: 11pt;")
             
             # 清空條碼輸入
             self.barcode_input.clear()
@@ -411,7 +484,7 @@ class VotingWindow(QWidget):
         if checked:
             self.selected_vote_option = option
             self.vote_status_label.setText(f"✓ 已選擇: {option}")
-            self.vote_status_label.setStyleSheet("color: #4CAF50; font-weight: bold; font-size: 10pt;")
+            self.vote_status_label.setStyleSheet("color: #4CAF50; font-weight: bold; font-size: 11pt;")
             
             # 焦點放在條碼輸入框
             self.barcode_input.setFocus()
